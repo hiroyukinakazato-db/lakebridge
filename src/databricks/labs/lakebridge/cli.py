@@ -139,55 +139,56 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
 
         logger.info("Executing Switch transpiler using Jobs API")
 
-        # Validate required parameters
-        if not config.input_source:
-            raise ValueError("Switch requires --input-source to be specified")
-        if not config.output_folder:
-            raise ValueError("Switch requires --output-folder to be specified")
-        if not config.catalog_name:
-            raise ValueError("Switch requires --catalog-name to be specified")  
-        if not config.schema_name:
-            raise ValueError("Switch requires --schema-name to be specified")
-
-        # Get job ID from config
+        # Get job ID from config first
         job_id = _get_switch_job_id()
         if not job_id:
             raise ValueError(
                 "Switch job not found. Please run 'lakebridge install-transpiler' first."
             )
 
-        # Create Switch job parameters
+        # Create Switch job parameters - let Switch handle comprehensive validation
         switch_params = SwitchJobParameters(
             input_dir=config.input_source,
             output_dir=config.output_folder,
             result_catalog=config.catalog_name,
             result_schema=config.schema_name,
-            sql_dialect=config.source_dialect or "tsql",
+            sql_dialect=config.source_dialect,
         )
-        switch_params.validate()
+
+        # Use Switch's comprehensive validation with require_all=True
+        try:
+            switch_params.validate(require_all=True)
+        except ValueError as validation_error:
+            # Provide user-friendly error messages for common issues
+            error_msg = str(validation_error)
+            if "sql_dialect" in error_msg:
+                supported_dialects = ", ".join(SwitchJobParameters.get_supported_sql_dialects())
+                raise ValueError(
+                    f"Switch requires --source-dialect to be specified. "
+                    f"Supported dialects: {supported_dialects}"
+                ) from validation_error
+            raise ValueError(f"Switch parameter validation failed: {error_msg}") from validation_error
 
         # Run existing job
         logger.info(f"Starting Switch job {job_id}...")
         job_runner = SwitchJobRunner(ctx.workspace_client, job_id)
-        run = job_runner.run_sync(switch_params, timeout_seconds=7200)
+        run_id = job_runner.run_async(switch_params)
+        logger.info(f"Switch job started with run ID: {run_id}")
 
         # Format result for CLI output
         return {
             "transpiler": "switch", 
             "job_id": job_id,
-            "run_id": run.run_id,
-            "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run.run_id}",
-            "state": run.state.life_cycle_state.value if run.state else "UNKNOWN",
-            "result_message": run.state.state_message if run.state else "No state message",
-            "input_source": config.input_source,
-            "output_folder": config.output_folder,
+            "run_id": run_id,
+            "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run_id}",
         }
 
-    except ImportError:
+    except ImportError as import_error:
+        logger.debug(f"Switch import failed: {import_error}")
         raise ValueError(
             "Switch transpiler is not properly installed. "
-            "Please install using 'lakebridge install-transpiler'."
-        )
+            "Please install using 'lakebridge install-transpiler' or ensure 'databricks-switch-plugin' package is available."
+        ) from import_error
     except Exception as e:
         logger.error(f"Failed to execute Switch transpiler: {e}")
         raise RuntimeError(f"Switch execution failed: {e}") from e
