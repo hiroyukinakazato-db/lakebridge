@@ -103,6 +103,96 @@ def _verify_workspace_client(ws: WorkspaceClient) -> WorkspaceClient:
     return ws
 
 
+def _is_switch_available() -> bool:
+    """Check if Switch transpiler is installed and available."""
+    try:
+        available_transpilers = TranspilerInstaller.all_transpiler_names()
+        return "switch" in available_transpilers
+    except Exception:
+        return False
+
+
+def _is_switch_request(transpiler_config_path: str | None) -> bool:
+    """Determine if this is an explicit Switch transpiler request via config path."""
+    return transpiler_config_path and "switch" in transpiler_config_path.lower()
+
+
+def _get_switch_job_id() -> int | None:
+    """Get Switch job ID from config.yml."""
+    try:
+        import yaml
+
+        config_path = TranspilerInstaller.transpiler_config_path("switch")
+        with open(config_path, 'r') as f:
+            config_data = yaml.safe_load(f)
+
+        return config_data.get('custom', {}).get('job_id')
+    except Exception:
+        return None
+
+
+def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -> dict:
+    """Execute Switch transpiler using existing workspace job."""
+    try:
+        from switch.api.job_runner import SwitchJobRunner
+        from switch.api.job_parameters import SwitchJobParameters
+
+        logger.info("Executing Switch transpiler using Jobs API")
+
+        # Validate required parameters
+        if not config.input_source:
+            raise ValueError("Switch requires --input-source to be specified")
+        if not config.output_folder:
+            raise ValueError("Switch requires --output-folder to be specified")
+        if not config.catalog_name:
+            raise ValueError("Switch requires --catalog-name to be specified")  
+        if not config.schema_name:
+            raise ValueError("Switch requires --schema-name to be specified")
+
+        # Get job ID from config
+        job_id = _get_switch_job_id()
+        if not job_id:
+            raise ValueError(
+                "Switch job not found. Please run 'lakebridge install-transpiler' first."
+            )
+
+        # Create Switch job parameters
+        switch_params = SwitchJobParameters(
+            input_dir=config.input_source,
+            output_dir=config.output_folder,
+            result_catalog=config.catalog_name,
+            result_schema=config.schema_name,
+            sql_dialect=config.source_dialect or "tsql",
+        )
+        switch_params.validate()
+
+        # Run existing job
+        logger.info(f"Starting Switch job {job_id}...")
+        job_runner = SwitchJobRunner(ctx.workspace_client, job_id)
+        run = job_runner.run_sync(switch_params, timeout_seconds=7200)
+
+        # Format result for CLI output
+        return {
+            "transpiler": "switch", 
+            "job_id": job_id,
+            "run_id": run.run_id,
+            "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run.run_id}",
+            "state": run.state.life_cycle_state.value if run.state else "UNKNOWN",
+            "result_message": run.state.state_message if run.state else "No state message",
+            "input_source": config.input_source,
+            "output_folder": config.output_folder,
+        }
+
+    except ImportError:
+        raise ValueError(
+            "Switch transpiler is not properly installed. "
+            "Please install using 'lakebridge install-transpiler'."
+        )
+    except Exception as e:
+        logger.error(f"Failed to execute Switch transpiler: {e}")
+        raise RuntimeError(f"Switch execution failed: {e}") from e
+
+
 @lakebridge.command
 def transpile(
     w: WorkspaceClient,
@@ -130,6 +220,15 @@ def transpile(
     checker.use_schema_name(schema_name)
     config, engine = checker.check()
     logger.debug(f"Final configuration for transpilation: {config!r}")
+
+    # Check if this is a Switch transpiler request
+    if (_is_switch_available() and 
+        _is_switch_request(config.transpiler_config_path)):
+
+        logger.info("Switch transpiler detected - using Jobs API execution")
+        result = _execute_switch_directly(ctx, config)
+        print(json.dumps(result))
+        return
 
     assert config.source_dialect is not None, "Source dialect has been validated by this point."
     with_user_agent_extra("transpiler_source_tech", make_alphanum_or_semver(config.source_dialect))

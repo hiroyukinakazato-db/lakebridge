@@ -518,6 +518,7 @@ class WorkspaceInstaller:
         elif module in {"transpile", "all"}:
             self.install_bladebridge()
             self.install_morpheus()
+            self.install_switch()
         if not config:
             config = self.configure(module)
         if self._is_testing():
@@ -543,6 +544,62 @@ class WorkspaceInstaller:
         group_id = "com.databricks.labs"
         artifact_id = product_name
         TranspilerInstaller.install_from_maven(product_name, group_id, artifact_id, artifact)
+
+    def install_switch(self, artifact: Path | None = None):
+        """Install Switch transpiler with workspace deployment."""
+        local_name = "switch"
+        pypi_name = "databricks-switch-plugin"
+
+        # Step 1: Install from PyPI
+        TranspilerInstaller.install_from_pypi(local_name, pypi_name, artifact)
+
+        # Step 2: Deploy to workspace and create job
+        try:
+            from switch.api.installer import SwitchInstaller
+
+            logger.info("Deploying Switch to workspace...")
+            switch_installer = SwitchInstaller(self._ws)
+            install_result = switch_installer.install()
+
+            # Step 3: Update config.yml with job information
+            self._update_switch_config(install_result)
+            logger.info(f"Switch deployed successfully. Job ID: {install_result.job_id}")
+
+        except ImportError:
+            logger.warning("Switch package not available for workspace deployment. PyPI installation completed.")
+        except Exception as e:
+            logger.error(f"Failed to deploy Switch to workspace: {e}")
+            raise RuntimeError(f"Switch workspace deployment failed: {e}") from e
+
+    def _update_switch_config(self, install_result):
+        """Update Switch config.yml with job deployment information."""
+        try:
+            import yaml
+
+            config_path = TranspilerInstaller.transpiler_config_path("switch")
+
+            # Read current config
+            with open(config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+
+            # Update custom section with job information
+            if 'custom' not in config_data:
+                config_data['custom'] = {}
+
+            config_data['custom'].update({
+                'job_id': install_result.job_id,
+                'job_name': install_result.job_name,
+                'switch_home': install_result.switch_home,
+            })
+
+            # Write updated config back
+            with open(config_path, 'w') as f:
+                yaml.dump(config_data, f, default_flow_style=False)
+
+            logger.debug(f"Updated Switch config with job info: {config_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to update Switch config with job info: {e}")
 
     @classmethod
     def is_java_version_okay(cls) -> bool:
@@ -574,6 +631,8 @@ class WorkspaceInstaller:
             cls.install_morpheus(path)
         elif "databricks_bb_plugin" in path.name:
             cls.install_bladebridge(path)
+        elif "databricks-switch-plugin" in path.name:
+            cls.install_switch(path)
         else:
             logger.fatal(f"Cannot install unsupported artifact: {artifact}")
 
