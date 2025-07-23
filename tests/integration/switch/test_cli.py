@@ -24,7 +24,6 @@ Test coverage:
     Complete CLI workflow with real Switch execution
     Mocks: None (requires DATABRICKS_HOST/TOKEN and switch package)
 """
-import json
 import logging
 import os
 import tempfile
