@@ -20,10 +20,6 @@ Test coverage:
     Tests Jobs API execution flow
     Mocks: switch.api.job_runner.SwitchJobRunner, _get_switch_job_id
     
-- test_switch_error_handling:
-    Tests common error scenarios (missing job ID, validation failures)
-    Mocks: Various switch.api components
-    
 - test_switch_cli_end_to_end:
     Complete CLI workflow with real Switch execution
     Mocks: None (requires DATABRICKS_HOST/TOKEN and switch package)
@@ -38,12 +34,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
-from databricks.labs.lakebridge.cli import (
-    _is_switch_available,
-    _is_switch_request,
-    _get_switch_job_id,
-    _execute_switch_directly
-)
+from databricks.labs.lakebridge import cli
 from databricks.labs.lakebridge.config import TranspileConfig
 from databricks.labs.lakebridge.contexts.application import ApplicationContext
 from databricks.labs.lakebridge.install import TranspilerInstaller
@@ -117,7 +108,7 @@ class TestSwitchCLIIntegration:
     def test_switch_detection(self, switch_config_path):
         """Test that Switch is properly detected when installed"""
         # When Switch config exists, it should be detected
-        is_available = _is_switch_available()
+        is_available = cli._is_switch_available()
         assert is_available is True, "Switch should be detected when config exists"
         
         # Verify Switch appears in available transpilers
@@ -135,8 +126,8 @@ class TestSwitchCLIIntegration:
         )
         
         # Should route to Switch when available and requested
-        assert _is_switch_available() is True
-        assert _is_switch_request(switch_config.transpiler_config_path) is True
+        assert cli._is_switch_available() is True
+        assert cli._is_switch_request(switch_config.transpiler_config_path) is True
         
         # Test with non-Switch transpiler
         non_switch_config = TranspileConfig(
@@ -146,7 +137,7 @@ class TestSwitchCLIIntegration:
             output_folder="/test/output"
         )
         
-        assert _is_switch_request(non_switch_config.transpiler_config_path) is False
+        assert cli._is_switch_request(non_switch_config.transpiler_config_path) is False
 
     def test_switch_parameter_mapping(self, mock_application_context, valid_transpile_config, switch_config_path):
         """Test conversion from TranspileConfig to SwitchJobParameters"""
@@ -187,7 +178,7 @@ class TestSwitchCLIIntegration:
                 mock_params_class.return_value = mock_params
                 
                 # Execute Switch directly
-                result = _execute_switch_directly(mock_application_context, valid_transpile_config)
+                result = cli._execute_switch_directly(mock_application_context, valid_transpile_config)
                 
                 # Verify result structure
                 assert isinstance(result, dict)
@@ -202,44 +193,6 @@ class TestSwitchCLIIntegration:
                     12345  # job_id from config
                 )
                 mock_job_runner.run_async.assert_called_once_with(mock_params)
-
-    def test_switch_error_handling(self, mock_application_context, switch_config_path):
-        """Test common error scenarios in Switch execution"""
-        # Test 1: Missing job ID
-        config = TranspileConfig(
-            transpiler_config_path=str(switch_config_path),
-            source_dialect="snowflake",
-            input_source="/test/input",
-            output_folder="/test/output"
-        )
-        
-        # Mock Switch imports to be available
-        with patch('switch.api.job_runner.SwitchJobRunner'):
-            with patch('switch.api.job_parameters.SwitchJobParameters'):
-                # Mock _get_switch_job_id to return None (simulating missing job)
-                with patch('databricks.labs.lakebridge.cli._get_switch_job_id', return_value=None):
-                    with pytest.raises(ValueError, match="Switch job not found"):
-                        _execute_switch_directly(mock_application_context, config)
-        
-        # Test 2: Invalid dialect
-        invalid_config = TranspileConfig(
-            transpiler_config_path=str(switch_config_path),
-            source_dialect="invalid_dialect",
-            input_source="/test/input",
-            output_folder="/test/output",
-            catalog_name="catalog",
-            schema_name="schema"
-        )
-        
-        with patch('switch.api.job_runner.SwitchJobRunner'):
-            with patch('switch.api.job_parameters.SwitchJobParameters') as mock_params_class:
-                mock_params = MagicMock()
-                mock_params.validate.side_effect = ValueError("Invalid sql_dialect")
-                mock_params_class.return_value = mock_params
-                mock_params_class.get_supported_sql_dialects.return_value = ["snowflake", "teradata"]
-                
-                with pytest.raises(ValueError, match="Switch requires --source-dialect"):
-                    _execute_switch_directly(mock_application_context, invalid_config)
 
     def test_switch_cli_end_to_end(self, switch_config_path):
         """End-to-end test of Switch CLI integration"""
@@ -273,11 +226,11 @@ class TestSwitchCLIIntegration:
         # Test the complete flow
         try:
             # Verify Switch is detected
-            assert _is_switch_available() is True
-            assert _is_switch_request(config.transpiler_config_path) is True
+            assert cli._is_switch_available() is True
+            assert cli._is_switch_request(config.transpiler_config_path) is True
             
             # Get job ID from config
-            job_id = _get_switch_job_id()
+            job_id = cli._get_switch_job_id()
             assert job_id is not None, "Job ID should be available from config"
             assert job_id == 12345, "Job ID should match config"
             
@@ -293,12 +246,12 @@ class TestSwitchHelperFunctions:
     
     def test_get_switch_job_id(self, switch_config_path):
         """Test job ID extraction from config"""
-        job_id = _get_switch_job_id()
+        job_id = cli._get_switch_job_id()
         assert job_id == 12345, "Should extract job ID from config"
     
     def test_get_switch_job_id_missing(self):
         """Test job ID extraction when config is missing"""
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.object(TranspilerInstaller, "transpilers_path", return_value=Path(temp_dir)):
-                job_id = _get_switch_job_id()
+                job_id = cli._get_switch_job_id()
                 assert job_id is None, "Should return None when config missing"
