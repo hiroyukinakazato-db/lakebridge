@@ -159,29 +159,44 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
         try:
             switch_params.validate(require_all=True)
         except ValueError as validation_error:
-            # Provide user-friendly error messages for common issues
-            error_msg = str(validation_error)
-            if "sql_dialect" in error_msg:
-                supported_dialects = ", ".join(SwitchJobParameters.get_supported_sql_dialects())
-                raise ValueError(
-                    f"Switch requires --source-dialect to be specified. "
-                    f"Supported dialects: {supported_dialects}"
-                ) from validation_error
-            raise ValueError(f"Switch parameter validation failed: {error_msg}") from validation_error
+            raise ValueError(f"Switch parameter validation failed: {validation_error}") from validation_error
 
-        # Run existing job
-        logger.info(f"Starting Switch job {job_id}...")
+        # Initialize job runner
         job_runner = SwitchJobRunner(ctx.workspace_client, job_id)
-        run_id = job_runner.run_async(switch_params)
-        logger.info(f"Switch job started with run ID: {run_id}")
 
-        # Format result for CLI output
-        return {
-            "transpiler": "switch", 
-            "job_id": job_id,
-            "run_id": run_id,
-            "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run_id}",
-        }
+        # Check wait_for_completion from transpiler_options
+        wait_for_completion = False
+        if config.transpiler_options and isinstance(config.transpiler_options, dict):
+            wait_option = config.transpiler_options.get("wait_for_completion", "false")
+            wait_for_completion = str(wait_option).lower() == "true"
+
+        # Run job based on wait preference
+        if wait_for_completion:
+            logger.info(f"Starting Switch job {job_id} (waiting for completion)...")
+            run = job_runner.run_sync(switch_params)
+            logger.info(f"Switch job completed with run ID: {run.run_id}")
+
+            # Format detailed result for synchronous execution
+            return {
+                "transpiler": "switch",
+                "job_id": job_id,
+                "run_id": run.run_id if run.run_id else None,
+                "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run.run_id}",
+                "state": run.state.life_cycle_state.value if run.state and run.state.life_cycle_state else "UNKNOWN",
+                "result_state": run.state.result_state.value if run.state and run.state.result_state else None,
+            }
+        else:
+            logger.info(f"Starting Switch job {job_id}...")
+            run_id = job_runner.run_async(switch_params)
+            logger.info(f"Switch job started with run ID: {run_id}")
+            
+            # Format result for asynchronous execution
+            return {
+                "transpiler": "switch",
+                "job_id": job_id,
+                "run_id": run_id,
+                "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run_id}",
+            }
 
     except ImportError as import_error:
         logger.debug(f"Switch import failed: {import_error}")

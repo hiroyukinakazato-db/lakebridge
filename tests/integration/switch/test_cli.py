@@ -16,10 +16,14 @@ Test coverage:
     Validates TranspileConfig to SwitchJobParameters conversion
     Mocks: switch.api.job_parameters.SwitchJobParameters
     
-- test_switch_job_execution:
-    Tests Jobs API execution flow
+- test_switch_job_execution_async:
+    Tests Switch job execution through Jobs API in async mode
     Mocks: switch.api.job_runner.SwitchJobRunner, _get_switch_job_id
-    
+
+- test_switch_job_execution_sync:
+    Tests Switch job execution through Jobs API in sync mode with wait_for_completion
+    Mocks: switch.api.job_runner.SwitchJobRunner, _get_switch_job_id
+
 - test_switch_cli_end_to_end:
     Complete CLI workflow with real Switch execution
     Mocks: None (requires DATABRICKS_HOST/TOKEN and switch package)
@@ -163,8 +167,8 @@ class TestSwitchCLIIntegration:
         except ImportError:
             pytest.skip("Switch package not available for parameter mapping test")
 
-    def test_switch_job_execution(self, mock_application_context, valid_transpile_config, switch_config_path):
-        """Test Switch job execution through Jobs API"""
+    def test_switch_job_execution_async(self, mock_application_context, valid_transpile_config, switch_config_path):
+        """Test Switch job execution through Jobs API (async mode)"""
         # Mock the switch.api components inside _execute_switch_directly
         with patch('switch.api.job_runner.SwitchJobRunner') as mock_job_runner_class:
             mock_job_runner = MagicMock()
@@ -192,6 +196,52 @@ class TestSwitchCLIIntegration:
                     12345  # job_id from config
                 )
                 mock_job_runner.run_async.assert_called_once_with(mock_params)
+
+    def test_switch_job_execution_sync(self, mock_application_context, switch_config_path):
+        """Test Switch job execution through Jobs API (sync mode with wait_for_completion)"""
+        # Create config with wait_for_completion option
+        config_with_wait = TranspileConfig(
+            transpiler_config_path=str(switch_config_path),
+            source_dialect="snowflake",
+            input_source="/Workspace/Users/test/sql_input",
+            output_folder="/Workspace/Users/test/notebooks_output",
+            catalog_name="test_catalog",
+            schema_name="test_schema",
+            transpiler_options={"wait_for_completion": "true"}
+        )
+
+        # Mock the switch.api components for synchronous execution
+        with patch('switch.api.job_runner.SwitchJobRunner') as mock_job_runner_class:
+            mock_job_runner = MagicMock()
+
+            # Mock run_sync return value
+            mock_run = MagicMock()
+            mock_run.run_id = 987654321
+            mock_run.state.life_cycle_state.value = "TERMINATED"
+            mock_run.state.result_state.value = "SUCCESS"
+            mock_job_runner.run_sync.return_value = mock_run
+            mock_job_runner_class.return_value = mock_job_runner
+
+            with patch('switch.api.job_parameters.SwitchJobParameters') as mock_params_class:
+                mock_params = MagicMock()
+                mock_params.validate.return_value = None
+                mock_params_class.return_value = mock_params
+
+                # Execute Switch with wait option
+                result = cli._execute_switch_directly(mock_application_context, config_with_wait)
+
+                # Verify synchronous execution results
+                assert isinstance(result, dict)
+                assert result["transpiler"] == "switch"
+                assert result["job_id"] == 12345
+                assert result["run_id"] == 987654321
+                assert result["state"] == "TERMINATED"
+                assert result["result_state"] == "SUCCESS"
+                assert "run_url" in result
+
+                # Verify run_sync was called instead of run_async
+                mock_job_runner.run_sync.assert_called_once_with(mock_params)
+                mock_job_runner.run_async.assert_not_called()
 
     def test_switch_cli_end_to_end(self, switch_config_path):
         """End-to-end test of Switch CLI integration"""
