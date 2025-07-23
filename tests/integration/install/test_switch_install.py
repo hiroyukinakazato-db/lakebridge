@@ -1,10 +1,32 @@
 """Integration tests for Switch transpiler installation process
 
-These tests validate the 3-step installation process:
-1. PyPI Installation: TranspilerInstaller.install_from_pypi()
-2. Workspace Deployment: SwitchInstaller.install() creates Databricks job
-3. Config Update: _update_switch_config() writes job info to config.yml
+Switch differs from other transpilers (morpheus, bladebridge) as it runs as a Databricks job
+rather than locally, providing better scalability for large-scale SQL conversions.
+The job ID must be persisted in config.yml for subsequent transpile commands.
+
+Test coverage:
+- test_switch_pypi_installation: 
+    Validates PyPI package installation and config structure
+    Mocks: TranspilerInstaller.install_from_pypi (uses real TestPyPI config)
+    
+- test_switch_workspace_deployment: 
+    Tests Databricks job creation via SwitchInstaller
+    Mocks: switch.api.installer.SwitchInstaller (for fast execution)
+    
+- test_switch_config_update: 
+    Verifies job information persistence in config.yml
+    Mocks: None (direct file operations)
+    
+- test_switch_with_previous_installation: 
+    Tests cleanup of previous installations
+    Mocks: switch.api.installer.SwitchInstaller
+    
+- test_switch_end_to_end: 
+    Complete installation workflow with all components
+    Mocks: TranspilerInstaller.install_from_pypi (uses real TestPyPI config)
+    Note: Creates real Databricks job if credentials provided and switch package available
 """
+import logging
 import os
 import subprocess
 import sys
@@ -15,6 +37,9 @@ import pytest
 import yaml
 
 from databricks.labs.lakebridge.install import WorkspaceInstaller
+
+
+logger = logging.getLogger(__name__)
 
 
 # Fixtures for common test setup
@@ -92,8 +117,8 @@ def minimal_workspace_installer():
 class TestSwitchInstallationProcess:
     """Test the complete Switch installation process step by step"""
 
-    def test_install_switch_step1_pypi_installation(self, tmp_path, testpypi_install):
-        """Step 1: Test PyPI installation creates local Switch package structure"""
+    def test_switch_pypi_installation(self, tmp_path, testpypi_install):
+        """Test PyPI installation creates local Switch package structure"""
 
         # Real PyPI installation that copies actual config.yml
         def real_pypi_install(local_name, pypi_name, artifact):
@@ -116,7 +141,7 @@ class TestSwitchInstallationProcess:
         with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
             with patch('databricks.labs.lakebridge.install.TranspilerInstaller.install_from_pypi', side_effect=real_pypi_install):
 
-                # Execute Step 1: PyPI installation
+                # Execute PyPI installation
                 from databricks.labs.lakebridge.install import TranspilerInstaller
                 TranspilerInstaller.install_from_pypi("switch", "databricks-switch-plugin", None)
 
@@ -143,10 +168,10 @@ class TestSwitchInstallationProcess:
                 all_transpilers = TranspilerInstaller.all_transpiler_names()
                 assert 'switch' in all_transpilers
 
-                print(f"✅ Step 1: PyPI installation completed successfully (TestPyPI v{testpypi_install['version']})")
+                logger.info(f"PyPI installation completed successfully (TestPyPI v{testpypi_install['version']})")
 
-    def test_install_switch_step2_workspace_deployment(self, tmp_path, testpypi_install, mock_install_result, mock_workspace_installer):
-        """Step 2: Test workspace deployment creates Databricks job"""
+    def test_switch_workspace_deployment(self, tmp_path, testpypi_install, mock_install_result, mock_workspace_installer):
+        """Test workspace deployment creates Databricks job"""
 
         # Load environment variables
         try:
@@ -191,17 +216,20 @@ class TestSwitchInstallationProcess:
                 )
                 installer = mock_workspace_installer(ws)
 
-                # Execute Step 2: Workspace deployment (this calls SwitchInstaller.install())
+                # Execute workspace deployment (this calls SwitchInstaller.install())
                 installer.install_switch()
 
                 # Verify SwitchInstaller was called with workspace client
                 mock_switch_installer_class.assert_called_once_with(ws)
-                mock_installer.install.assert_called_once()
+                mock_installer.install.assert_called_once_with(
+                    previous_job_id=None,
+                    previous_switch_home=None
+                )
 
-                print(f"✅ Step 2: Workspace deployment completed. Job ID: {mock_install_result.job_id}")
+                logger.info(f"Workspace deployment completed. Job ID: {mock_install_result.job_id}")
 
-    def test_install_switch_step3_config_update(self, tmp_path, testpypi_install, mock_install_result, minimal_workspace_installer):
-        """Step 3: Test config update writes job information to config.yml"""
+    def test_switch_config_update(self, tmp_path, testpypi_install, mock_install_result, minimal_workspace_installer):
+        """Test config update writes job information to config.yml"""
 
         # Setup initial config (after PyPI installation)
         with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
@@ -218,7 +246,7 @@ class TestSwitchInstallationProcess:
             else:
                 pytest.skip(f"Config file not found in TestPyPI package: {source_config}")
 
-            # Execute Step 3: Config update using minimal installer fixture
+            # Execute config update using minimal installer fixture
             minimal_workspace_installer._update_switch_config(mock_install_result)
 
             # Verify config was updated with job information
@@ -238,9 +266,88 @@ class TestSwitchInstallationProcess:
             assert 'mysql' in updated_config['remorph']['dialects']  # TestPyPI has 8 dialects
             assert 'options' in updated_config  # TestPyPI includes options section
 
-            print(f"✅ Step 3: Config updated with job ID {mock_install_result.job_id}")
+            logger.info(f"Config updated with job ID {mock_install_result.job_id}")
 
-    def test_install_switch_end_to_end(self, tmp_path, testpypi_install):
+    def test_switch_with_previous_installation(self, tmp_path, testpypi_install, mock_install_result, mock_workspace_installer):
+        """Test Switch installation with cleanup of previous installation"""
+        
+        # Load environment variables
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass
+
+        # Check credentials
+        host = os.getenv('DATABRICKS_HOST')
+        token = os.getenv('DATABRICKS_TOKEN')
+        if not (host and token):
+            pytest.skip("Databricks credentials required. Set DATABRICKS_HOST and DATABRICKS_TOKEN in .env file.")
+
+        # Setup environment with existing Switch installation
+        with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
+            # Create Switch package structure with previous installation info
+            switch_dir = tmp_path / "switch" / "lib"
+            switch_dir.mkdir(parents=True)
+            config_path = switch_dir / "config.yml"
+
+            # Create config with previous installation info (matching actual config.yml format)
+            previous_config_data = {
+                "remorph": {
+                    "version": 1,
+                    "name": "switch",
+                    "dialects": ["mysql", "netezza", "oracle", "postgresql", 
+                                 "redshift", "snowflake", "teradata", "tsql"],
+                    "command_line": ["echo", "Switch uses Jobs API, not LSP"]
+                },
+                "options": {
+                    "all": []  # Empty options list is fine for testing
+                },
+                "custom": {
+                    "execution_type": "jobs_api",
+                    "job_id": 999888777,  # Previous job ID
+                    "job_name": "old-switch-job",
+                    "switch_home": "/Workspace/Users/test/.lakebridge-switch-old"
+                }
+            }
+            
+            with config_path.open("w") as f:
+                yaml.dump(previous_config_data, f)
+
+            # Mock workspace deployment to return new job information
+            with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
+                mock_installer = MagicMock()
+                mock_installer.install.return_value = mock_install_result
+                mock_switch_installer_class.return_value = mock_installer
+
+                # Create WorkspaceInstaller
+                from databricks.sdk import WorkspaceClient
+                ws = WorkspaceClient(
+                    host=os.getenv('DATABRICKS_HOST'),
+                    token=os.getenv('DATABRICKS_TOKEN')
+                )
+                installer = mock_workspace_installer(ws)
+
+                # Execute installation - should detect and pass previous installation info
+                installer.install_switch()
+
+                # Verify SwitchInstaller.install was called with previous installation info
+                mock_installer.install.assert_called_once_with(
+                    previous_job_id=999888777,
+                    previous_switch_home="/Workspace/Users/test/.lakebridge-switch-old"
+                )
+
+                # Verify config was updated with new job info
+                with config_path.open('r') as f:
+                    updated_config = yaml.safe_load(f)
+
+                assert updated_config['custom']['job_id'] == mock_install_result.job_id
+                assert updated_config['custom']['job_name'] == mock_install_result.job_name
+                assert updated_config['custom']['switch_home'] == mock_install_result.switch_home
+
+                logger.info(f"Previous installation (job_id=999888777) cleaned up and new installation completed (job_id={mock_install_result.job_id})")
+
+    def test_switch_end_to_end(self, tmp_path, testpypi_install):
         """End-to-end test: Complete installation process with real Databricks workspace"""
 
         # Load environment variables
@@ -256,7 +363,7 @@ class TestSwitchInstallationProcess:
         if not (host and token):
             pytest.skip("Databricks credentials required. Set DATABRICKS_HOST and DATABRICKS_TOKEN in .env file.")
 
-        # Mock PyPI installation using real TestPyPI package (Step 1)
+        # Mock PyPI installation using real TestPyPI package
         def mock_pypi_install(local_name, pypi_name, artifact):
             switch_dir = tmp_path / "switch" / "lib"
             switch_dir.mkdir(parents=True)
@@ -308,22 +415,22 @@ class TestSwitchInstallationProcess:
                     with config_path.open('r') as f:
                         final_config = yaml.safe_load(f)
 
-                    # Verify all 3 steps completed successfully with real TestPyPI config
-                    assert 'remorph' in final_config, "Step 1 (PyPI) failed: missing remorph section"
-                    assert final_config['remorph']['name'] == 'switch', "Step 1 (PyPI) failed: wrong transpiler name"
-                    assert len(final_config['remorph']['dialects']) >= 8, "Step 1 (PyPI) failed: missing SQL dialects from TestPyPI"
-                    assert 'options' in final_config, "Step 1 (PyPI) failed: missing options section from TestPyPI"
+                    # Verify all steps completed successfully with real TestPyPI config
+                    assert 'remorph' in final_config, "PyPI installation failed: missing remorph section"
+                    assert final_config['remorph']['name'] == 'switch', "PyPI installation failed: wrong transpiler name"
+                    assert len(final_config['remorph']['dialects']) >= 8, "PyPI installation failed: missing SQL dialects from TestPyPI"
+                    assert 'options' in final_config, "PyPI installation failed: missing options section from TestPyPI"
 
-                    assert 'custom' in final_config, "Step 3 (Config update) failed: missing custom section"
-                    assert final_config['custom']['job_id'] is not None, "Step 2 (Workspace deployment) failed: no job created"
-                    assert isinstance(final_config['custom']['job_id'], int), "Step 2 (Workspace deployment) failed: invalid job ID"
+                    assert 'custom' in final_config, "Config update failed: missing custom section"
+                    assert final_config['custom']['job_id'] is not None, "Workspace deployment failed: no job created"
+                    assert isinstance(final_config['custom']['job_id'], int), "Workspace deployment failed: invalid job ID"
 
                     job_id = final_config['custom']['job_id']
                     dialect_count = len(final_config['remorph']['dialects'])
-                    print(f"🎉 End-to-end installation successful!")
-                    print(f"   Step 1: TestPyPI package installed (v{testpypi_install['version']}, {dialect_count} dialects) ✅")
-                    print(f"   Step 2: Databricks job created (ID: {job_id}) ✅")
-                    print(f"   Step 3: Config updated with job info ✅")
+                    logger.info(f"End-to-end installation successful!")
+                    logger.info(f"TestPyPI package installed (v{testpypi_install['version']}, {dialect_count} dialects)")
+                    logger.info(f"Databricks job created (ID: {job_id})")
+                    logger.info(f"Config updated with job info")
 
                 except Exception as e:
                     import traceback

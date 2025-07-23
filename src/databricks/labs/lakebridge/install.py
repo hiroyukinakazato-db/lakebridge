@@ -553,15 +553,24 @@ class WorkspaceInstaller:
         # Step 1: Install from PyPI
         TranspilerInstaller.install_from_pypi(local_name, pypi_name, artifact)
 
-        # Step 2: Deploy to workspace and create job
+        # Step 2: Extract previous installation info for cleanup
+        previous_job_id, previous_switch_home = self._get_previous_switch_installation()
+
+        # Step 3: Deploy to workspace and create job (with automatic cleanup)
         try:
             from switch.api.installer import SwitchInstaller
 
             logger.info("Deploying Switch to workspace...")
+            if previous_job_id or previous_switch_home:
+                logger.info(f"Previous installation detected - will clean up job_id={previous_job_id}, switch_home={previous_switch_home}")
+            
             switch_installer = SwitchInstaller(self._ws)
-            install_result = switch_installer.install()
+            install_result = switch_installer.install(
+                previous_job_id=previous_job_id,
+                previous_switch_home=previous_switch_home
+            )
 
-            # Step 3: Update config.yml with job information
+            # Step 4: Update config.yml with job information
             self._update_switch_config(install_result)
             logger.info(f"Switch deployed successfully. Job ID: {install_result.job_id}")
 
@@ -571,28 +580,61 @@ class WorkspaceInstaller:
             logger.error(f"Failed to deploy Switch to workspace: {e}")
             raise RuntimeError(f"Switch workspace deployment failed: {e}") from e
 
-    def _update_switch_config(self, install_result):
-        """Update Switch config.yml with job deployment information."""
+    def _read_switch_config(self) -> dict | None:
+        """Read Switch config.yml file.
+        
+        Returns:
+            dict: Parsed config data or None if reading fails
+        """
         try:
             import yaml
-
             config_path = TranspilerInstaller.transpiler_config_path("switch")
-
-            # Read current config
             with open(config_path, 'r') as f:
-                config_data = yaml.safe_load(f)
+                return yaml.safe_load(f)
+        except Exception:
+            return None
 
-            # Update custom section with job information
-            if 'custom' not in config_data:
-                config_data['custom'] = {}
+    def _get_previous_switch_installation(self) -> tuple[int | None, str | None]:
+        """Extract previous Switch installation info from config for cleanup.
+        
+        Returns:
+            tuple: (previous_job_id, previous_switch_home) or (None, None) if not found
+        """
+        config_data = self._read_switch_config()
+        if not config_data:
+            logger.debug("No previous Switch installation found or config read failed")
+            return None, None
+        
+        custom = config_data.get('custom', {})
+        previous_job_id = custom.get('job_id')
+        previous_switch_home = custom.get('switch_home')
+        
+        if previous_job_id is not None or previous_switch_home is not None:
+            logger.debug(f"Found previous Switch installation: job_id={previous_job_id}, switch_home={previous_switch_home}")
+        
+        return previous_job_id, previous_switch_home
 
-            config_data['custom'].update({
-                'job_id': install_result.job_id,
-                'job_name': install_result.job_name,
-                'switch_home': install_result.switch_home,
-            })
+    def _update_switch_config(self, install_result):
+        """Update Switch config.yml with job deployment information."""
+        config_data = self._read_switch_config()
+        if not config_data:
+            logger.warning("Failed to read Switch config for update")
+            return
 
-            # Write updated config back
+        # Update custom section with job information
+        if 'custom' not in config_data:
+            config_data['custom'] = {}
+
+        config_data['custom'].update({
+            'job_id': install_result.job_id,
+            'job_name': install_result.job_name,
+            'switch_home': install_result.switch_home,
+        })
+
+        # Write updated config back
+        try:
+            import yaml
+            config_path = TranspilerInstaller.transpiler_config_path("switch")
             with open(config_path, 'w') as f:
                 yaml.dump(config_data, f, default_flow_style=False)
 
