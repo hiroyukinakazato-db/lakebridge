@@ -67,7 +67,7 @@ def mock_workspace_installer():
         from databricks.labs.blueprint.wheels import ProductInfo
         from databricks.labs.lakebridge.deployment.configurator import ResourceConfigurator
         from databricks.labs.lakebridge.deployment.installation import WorkspaceInstallation
-        
+
         return WorkspaceInstaller(
             ws=ws,
             prompts=MockPrompts({}),
