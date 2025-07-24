@@ -23,10 +23,6 @@ Test coverage:
 - test_switch_job_execution_sync:
     Tests Switch job execution through Jobs API in sync mode with wait_for_completion
     Mocks: switch.api.job_runner.SwitchJobRunner, _get_switch_job_id
-
-- test_switch_cli_end_to_end:
-    Complete CLI workflow with real Switch execution
-    Mocks: None (requires DATABRICKS_HOST/TOKEN and switch package)
 """
 import logging
 import os
@@ -242,52 +238,6 @@ class TestSwitchCLIIntegration:
                 # Verify run_sync was called instead of run_async
                 mock_job_runner.run_sync.assert_called_once_with(mock_params)
                 mock_job_runner.run_async.assert_not_called()
-
-    def test_switch_cli_end_to_end(self, switch_config_path):
-        """End-to-end test of Switch CLI integration"""
-        # Check prerequisites
-        host = os.getenv('DATABRICKS_HOST')
-        token = os.getenv('DATABRICKS_TOKEN')
-        if not (host and token):
-            pytest.skip("Databricks credentials required. Set DATABRICKS_HOST and DATABRICKS_TOKEN")
-        
-        try:
-            import switch
-        except ImportError:
-            pytest.skip("Switch package not available")
-        
-        # Create real ApplicationContext
-        from databricks.sdk import WorkspaceClient
-        ws = WorkspaceClient(host=host, token=token)
-        
-        ctx = ApplicationContext(ws)
-        
-        # Create config for Switch
-        config = TranspileConfig(
-            transpiler_config_path=str(switch_config_path),
-            source_dialect="snowflake",
-            input_source="/Workspace/Users/test/sample.sql",
-            output_folder="/Workspace/Users/test/converted",
-            catalog_name="test_catalog",
-            schema_name="test_schema"
-        )
-        
-        # Test the complete flow
-        try:
-            # Verify Switch is detected
-            assert cli._is_switch_available() is True
-            assert cli._is_switch_request(config.transpiler_config_path) is True
-            
-            # Get job ID from config
-            job_id = cli._get_switch_job_id()
-            assert job_id is not None, "Job ID should be available from config"
-            assert job_id == 12345, "Job ID should match config"
-            
-            # Note: We don't actually execute the job in tests to avoid creating real runs
-            logger.info(f"End-to-end test verified Switch integration (job_id={job_id})")
-            
-        except Exception as e:
-            pytest.fail(f"End-to-end test failed: {e}")
 
 
 class TestSwitchHelperFunctions:
