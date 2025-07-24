@@ -24,6 +24,7 @@ Environment Variables:
 - LAKEBRIDGE_SWITCH_PYPI_SOURCE: "testpypi" (default) or "pypi"
 - LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true: Include slow synchronous tests
 - LAKEBRIDGE_SWITCH_KEEP_RESOURCES=true: Keep resources for debugging
+- LAKEBRIDGE_SWITCH_FORCE_CLEANUP=true: Clean up all Switch jobs before tests
 - DATABRICKS_HOST & DATABRICKS_TOKEN: Workspace credentials
 
 Usage:
@@ -87,7 +88,18 @@ class TestSwitchE2E:
     @pytest.fixture(autouse=True)
     def setup_and_cleanup(self, workspace_client):
         """Ensure clean state before and after tests"""
-        # Setup: Clean any existing Switch installation
+        # Debug: Log environment variable state
+        force_cleanup_env = os.getenv("LAKEBRIDGE_SWITCH_FORCE_CLEANUP")
+        logger.info(f"LAKEBRIDGE_SWITCH_FORCE_CLEANUP environment variable: '{force_cleanup_env}'")
+        
+        # Setup: Comprehensive cleanup if force cleanup is enabled
+        if force_cleanup_env == "true":
+            logger.info("Force cleanup enabled - performing comprehensive Switch job cleanup")
+            self._cleanup_all_switch_jobs(workspace_client)
+        else:
+            logger.info(f"Force cleanup disabled (env='{force_cleanup_env}') - skipping comprehensive cleanup")
+        
+        # Setup: Clean any existing Switch installation (legacy cleanup)
         job_id = _get_switch_job_id()
         if job_id:
             logger.info(f"Cleaning up existing Switch job {job_id} before test")
@@ -177,58 +189,74 @@ class TestSwitchE2E:
         os.getenv("LAKEBRIDGE_SWITCH_INCLUDE_SYNC") != "true",
         reason="Sync test skipped (takes ~10 min). Set LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true to run"
     )
-    def test_sync_transpilation(self, workspace_client):
-        """Test synchronous transpilation (wait_for_completion=true)
+    def test_sync_transpilation_complete(self, workspace_client, pypi_source):
+        """Test complete synchronous transpilation lifecycle (independent)
 
-        Why separate test: Sync mode takes ~10 minutes vs ~30 seconds for async.
-        Most users want fast async mode, but CI/CD pipelines need sync mode.
+        This is a complete independent test that:
+        1. Installs Switch
+        2. Configures sync mode
+        3. Executes synchronous transpilation
+        4. Verifies results
+        5. Uninstalls Switch
+
+        Why independent: Ensures sync test can run alone without dependencies on other tests.
+        Why separate from async test: Sync mode takes ~10 minutes vs ~30 seconds for async.
         """
-        logger.info("Testing synchronous transpilation")
+        logger.info(f"Starting independent sync transpilation test with PyPI source: {pypi_source}")
 
-        # Ensure Switch is installed
-        job_id = _get_switch_job_id()
-        if not job_id:
-            pytest.skip("Switch not installed. Run test_complete_lifecycle first")
-
-        # Update config to enable sync execution
-        self._update_switch_config_wait_option(True)
+        # Step 1: Install Switch
+        logger.info("Step 1: Installing Switch for sync test")
+        job_id = self._install_and_verify_switch(workspace_client, pypi_source)
+        logger.info(f"Switch installed for sync test with job ID: {job_id}")
 
         try:
+            # Step 2: Execute sync transpilation
+            logger.info("Step 2: Testing synchronous transpilation")
+            
             # Create test SQL in workspace
             input_dir, output_dir = self._create_workspace_test_dirs(workspace_client, "sync")
             self._upload_test_sql(workspace_client, input_dir, "SELECT 1 AS test_column")
 
-            # Run sync transpile
-            start_time = time.time()
+            try:
+                # Run sync transpile with wait_for_completion=True
+                start_time = time.time()
 
-            result = self._run_transpile(
-                source_dialect="snowflake",
-                input_source=input_dir,
-                output_folder=output_dir
-            )
+                result = self._execute_switch_transpilation(
+                    workspace_client,
+                    source_dialect="snowflake",
+                    input_source=input_dir,
+                    output_folder=output_dir,
+                    wait_for_completion=True  # Enable synchronous execution
+                )
 
-            elapsed_time = time.time() - start_time
-            logger.info(f"Sync transpilation completed in {elapsed_time:.1f} seconds")
+                elapsed_time = time.time() - start_time
+                logger.info(f"Sync transpilation completed in {elapsed_time:.1f} seconds")
 
-            # Verify sync execution result
-            assert result["transpiler"] == "switch"
-            assert result["job_id"] == job_id
-            assert "state" in result
-            assert "result_state" in result
-            assert result["state"] in ["TERMINATED", "SKIPPED"]
+                # Step 3: Verify sync execution result
+                assert result["transpiler"] == "switch"
+                assert result["job_id"] == job_id
+                assert "state" in result
+                assert "result_state" in result
+                assert result["state"] in ["TERMINATED", "SKIPPED"]
 
-            # Check output was created
-            output_items = workspace_client.workspace.list(output_dir)
-            output_count = sum(1 for _ in output_items)
-            assert output_count > 0, "No output files created"
-            logger.info(f"Sync transpilation successful with state: {result['state']}")
+                # Check output was created
+                output_items = workspace_client.workspace.list(output_dir)
+                output_count = sum(1 for _ in output_items)
+                assert output_count > 0, "No output files created"
+                logger.info(f"Sync transpilation successful with state: {result['state']}")
 
-            # Clean up
-            self._cleanup_workspace_test_dir(workspace_client, input_dir)
+            finally:
+                # Clean up workspace test directory
+                self._cleanup_workspace_test_dir(workspace_client, input_dir)
 
         finally:
-            # Restore async mode
-            self._update_switch_config_wait_option(False)
+            # Step 4: Uninstall Switch
+            logger.info("Step 4: Cleaning up sync test")
+            self._uninstall_switch(workspace_client)
+            
+            # Verify cleanup
+            assert _get_switch_job_id() is None, "Switch config should be removed after sync test"
+            logger.info("Sync test cleanup completed successfully")
 
     # ==================== Installation Methods ====================
 
@@ -343,8 +371,15 @@ class TestSwitchE2E:
 
     # ==================== Execution Methods ====================
 
-    def _execute_switch_transpilation(self, workspace_client, source_dialect, input_source, output_folder):
+    def _execute_switch_transpilation(self, workspace_client, source_dialect, input_source, output_folder, wait_for_completion=False):
         """Execute Switch transpilation using direct API
+
+        Args:
+            workspace_client: Databricks workspace client
+            source_dialect: SQL source dialect
+            input_source: Input directory path
+            output_folder: Output directory path  
+            wait_for_completion: If True, wait for job completion (sync mode)
 
         Why bypass CLI: The CLI's path validation assumes local filesystem paths,
         but Switch requires Databricks workspace paths like /Workspace/Users/...
@@ -354,18 +389,25 @@ class TestSwitchE2E:
         from databricks.labs.lakebridge.contexts.application import ApplicationContext
         from databricks.labs.lakebridge.cli import _execute_switch_directly
 
-        # Create config with proper paths
+        # Prepare transpiler options for sync/async control
+        transpiler_options = {}
+        if wait_for_completion:
+            transpiler_options["wait_for_completion"] = "true"
+
+        # Create config with proper paths and transpiler options
         config = TranspileConfig(
             transpiler_config_path=str(self._get_switch_config_path()),
             source_dialect=source_dialect,
             input_source=input_source,
             output_folder=output_folder,
-            skip_validation=True  # Skip path validation for workspace paths
+            skip_validation=True,  # Skip path validation for workspace paths
+            transpiler_options=transpiler_options
         )
 
         # Execute Switch directly
         ctx = ApplicationContext(workspace_client)
-        logger.info("Testing Switch execution directly")
+        execution_mode = "synchronous" if wait_for_completion else "asynchronous"
+        logger.info(f"Testing Switch execution directly ({execution_mode} mode)")
         result = _execute_switch_directly(ctx, config)
         logger.info(f"Direct Switch execution result: {result}")
 
@@ -394,6 +436,100 @@ class TestSwitchE2E:
         raise ValueError("No JSON output found in command output")
 
     # ==================== Cleanup Methods ====================
+
+    def _cleanup_all_switch_jobs(self, workspace_client):
+        """Clean up all Switch jobs for current user
+        
+        This method scans all jobs in the workspace and deletes Switch jobs
+        belonging to the current user. Useful for cleaning up orphaned jobs
+        from previous test runs.
+        """
+        logger.info("=== Starting comprehensive Switch job cleanup ===")
+        
+        try:
+            # Get current user and create job name pattern
+            current_user = workspace_client.current_user.me().user_name
+            # Extract username part (before @) and replace dots with underscores
+            username_local = current_user.split('@')[0]
+            username_pattern = username_local.replace('.', '_')
+            job_name_prefix = f"lakebridge-switch {username_pattern}"
+            
+            logger.info(f"Current user: {current_user}")
+            logger.info(f"Username pattern: {username_pattern}")
+            logger.info(f"Job name prefix to match: '{job_name_prefix}'")
+            
+            # Find all Switch jobs for current user
+            logger.info("Fetching all jobs from workspace...")
+            switch_jobs = []
+            all_jobs = []
+            
+            try:
+                job_count = 0
+                for job in workspace_client.jobs.list():
+                    job_count += 1
+                    all_jobs.append(job)
+                    
+                    if job.settings and job.settings.name:
+                        logger.debug(f"Job {job.job_id}: '{job.settings.name}' - checking against '{job_name_prefix}'")
+                        if job.settings.name.startswith(job_name_prefix):
+                            logger.info(f"MATCH: Job {job.job_id}: '{job.settings.name}'")
+                            switch_jobs.append(job)
+                        else:
+                            logger.debug(f"NO MATCH: Job {job.job_id}: '{job.settings.name}'")
+                    else:
+                        logger.debug(f"Job {job.job_id}: No name or settings")
+                        
+                logger.info(f"Total jobs scanned: {job_count}")
+                logger.info(f"All job names (first 10):")
+                for i, job in enumerate(all_jobs[:10]):
+                    name = job.settings.name if (job.settings and job.settings.name) else "<no name>"
+                    logger.info(f"  {i+1}. Job {job.job_id}: '{name}'")
+                    
+            except Exception as e:
+                logger.error(f"Error listing jobs: {e}")
+                return
+                
+            if not switch_jobs:
+                logger.info("No Switch jobs found to clean up")
+                logger.info("=== Comprehensive cleanup completed (no jobs found) ===")
+                return
+                
+            logger.info(f"Found {len(switch_jobs)} Switch job(s) to clean up:")
+            for job in switch_jobs:
+                logger.info(f"  - Job ID: {job.job_id}, Name: '{job.settings.name}'")
+            
+            # Delete each Switch job safely
+            deleted_count = 0
+            for job in switch_jobs:
+                try:
+                    logger.info(f"Processing job {job.job_id}: '{job.settings.name}'")
+                    
+                    # Check if job is currently running
+                    try:
+                        runs = list(workspace_client.jobs.list_runs(job_id=job.job_id, active_only=True))
+                        if runs:
+                            logger.warning(f"Skipping job {job.job_id} - has {len(runs)} active runs")
+                            continue
+                        else:
+                            logger.info(f"Job {job.job_id} has no active runs - safe to delete")
+                    except Exception as e:
+                        logger.warning(f"Could not check active runs for job {job.job_id}: {e}")
+                        logger.info(f"Proceeding with deletion of job {job.job_id}")
+                    
+                    # Delete the job
+                    logger.info(f"Deleting job {job.job_id}...")
+                    workspace_client.jobs.delete(job.job_id)
+                    logger.info(f"✓ Successfully deleted Switch job {job.job_id}: '{job.settings.name}'")
+                    deleted_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"✗ Failed to delete job {job.job_id}: {e}")
+                    
+            logger.info(f"=== Comprehensive cleanup completed: {deleted_count}/{len(switch_jobs)} jobs deleted ===")
+            
+        except Exception as e:
+            logger.error(f"Error during comprehensive Switch job cleanup: {e}")
+            logger.error(f"=== Comprehensive cleanup failed ===", exc_info=True)
 
     def _uninstall_switch(self, workspace_client):
         """Uninstall Switch completely using SwitchInstaller"""
