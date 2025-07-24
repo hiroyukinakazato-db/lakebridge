@@ -122,7 +122,19 @@ def _get_switch_job_id() -> int | None:
     try:
         import yaml
 
-        config_path = TranspilerInstaller.transpiler_config_path("switch")
+        # First check if the config file exists in the expected location
+        transpilers_path = TranspilerInstaller.transpilers_path()
+        switch_config_path = transpilers_path / "switch" / "lib" / "config.yml"
+        
+        if not switch_config_path.exists():
+            # Fallback: try to get from TranspilerInstaller if available
+            try:
+                config_path = TranspilerInstaller.transpiler_config_path("switch")
+            except ValueError:
+                return None
+        else:
+            config_path = switch_config_path
+            
         with open(config_path, 'r') as f:
             config_data = yaml.safe_load(f)
 
