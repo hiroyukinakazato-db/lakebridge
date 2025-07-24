@@ -4,11 +4,10 @@ Switch is a Databricks-native SQL transpiler that uses LLMs to convert SQL betwe
 Unlike traditional transpilers (BladeRunner, Morpheus) that use LSP, Switch runs as a 
 Databricks job, making it scalable and cloud-native.
 
-This module tests the complete Switch lifecycle:
-1. Installation: Deploy Switch as a Databricks job
-2. Reinstallation: Verify proper cleanup of previous installations
-3. Transpilation: Execute SQL conversion via Jobs API
-4. Uninstallation: Complete removal of all Switch resources
+This module contains three types of tests:
+1. Installation Lifecycle: Test install, reinstall, and uninstall operations
+2. Async Transpilation: Test SQL conversion with asynchronous job execution
+3. Sync Transpilation: Test SQL conversion with synchronous job execution (wait for completion)
 
 Key Challenges Addressed:
 - Workspace vs Local Paths: CLI validates paths as local filesystem paths, but Switch 
