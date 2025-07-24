@@ -6,8 +6,8 @@ Databricks job, making it scalable and cloud-native.
 
 This module tests the complete Switch lifecycle:
 1. Installation: Deploy Switch as a Databricks job
-2. Transpilation: Execute SQL conversion via Jobs API
-3. Reinstallation: Verify proper cleanup of previous installations
+2. Reinstallation: Verify proper cleanup of previous installations
+3. Transpilation: Execute SQL conversion via Jobs API
 4. Uninstallation: Complete removal of all Switch resources
 
 Key Challenges Addressed:
@@ -114,7 +114,7 @@ class TestSwitchE2E:
     # ==================== Main Test Methods ====================
 
     def test_complete_lifecycle(self, workspace_client, pypi_source):
-        """Test: Install → Transpile → Reinstall → Uninstall"""
+        """Test: Install → Reinstall → Transpile → Uninstall"""
         logger.info(f"Starting Switch E2E test with PyPI source: {pypi_source}")
 
         # Step 1: Install Switch
@@ -122,8 +122,24 @@ class TestSwitchE2E:
         job_id = self._install_and_verify_switch(workspace_client, pypi_source)
         logger.info(f"Switch installed successfully with job ID: {job_id}")
 
-        # Step 2: Transpile simple SQL (async)
-        logger.info("Step 2: Testing async transpilation")
+        # Step 2: Reinstall (test cleanup of previous installation)
+        logger.info("Step 2: Testing reinstallation with cleanup")
+        old_job_id = job_id
+
+        self._install_switch(pypi_source)
+
+        # Verify new installation
+        new_job_id = _get_switch_job_id()
+        assert new_job_id is not None, "Switch job ID not found after reinstallation"
+        assert new_job_id != old_job_id, "New job ID should be different from old one"
+        assert self._verify_job_exists(workspace_client, new_job_id), f"New job {new_job_id} not found"
+
+        # Note: Old job cleanup verification is skipped as Switch installer handles this
+        # and there may be timing issues with immediate verification
+        logger.info(f"Reinstallation successful. Old job {old_job_id} cleaned up, new job {new_job_id} created")
+
+        # Step 3: Transpile simple SQL (async)
+        logger.info("Step 3: Testing async transpilation")
 
         # Create test SQL in workspace
         input_dir, output_dir = self._create_workspace_test_dirs(workspace_client, "async")
@@ -139,29 +155,13 @@ class TestSwitchE2E:
 
             # Verify async execution result
             assert result["transpiler"] == "switch"
-            assert result["job_id"] == job_id
+            assert result["job_id"] == new_job_id
             assert "run_id" in result
             assert "run_url" in result
             logger.info(f"Async transpilation started with run ID: {result['run_id']}")
 
         finally:
             self._cleanup_workspace_test_dir(workspace_client, input_dir)
-
-        # Step 3: Reinstall (test cleanup of previous installation)
-        logger.info("Step 3: Testing reinstallation with cleanup")
-        old_job_id = job_id
-
-        self._install_switch(pypi_source)
-
-        # Verify new installation
-        new_job_id = _get_switch_job_id()
-        assert new_job_id is not None, "Switch job ID not found after reinstallation"
-        assert new_job_id != old_job_id, "New job ID should be different from old one"
-        assert self._verify_job_exists(workspace_client, new_job_id), f"New job {new_job_id} not found"
-
-        # Note: Old job cleanup verification is skipped as Switch installer handles this
-        # and there may be timing issues with immediate verification
-        logger.info(f"Reinstallation successful. Old job {old_job_id} cleaned up, new job {new_job_id} created")
 
         # Step 4: Uninstall
         logger.info("Step 4: Testing uninstallation")
