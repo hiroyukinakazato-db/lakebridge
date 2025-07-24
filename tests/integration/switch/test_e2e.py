@@ -23,16 +23,25 @@ Environment Variables:
 - LAKEBRIDGE_SWITCH_E2E=true: Enable E2E tests (disabled by default)
 - LAKEBRIDGE_SWITCH_PYPI_SOURCE: "testpypi" (default) or "pypi"
 - LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true: Include slow synchronous tests
-- LAKEBRIDGE_SWITCH_KEEP_RESOURCES=true: Keep resources for debugging
-- LAKEBRIDGE_SWITCH_FORCE_CLEANUP=true: Clean up all Switch jobs before tests
+- LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE=true: Clean up all Switch jobs before tests
+- LAKEBRIDGE_SWITCH_KEEP_AFTER=true: Keep resources after tests (for debugging)
 - DATABRICKS_HOST & DATABRICKS_TOKEN: Workspace credentials
 
 Usage:
     # Quick test (async only, ~30 seconds)
     LAKEBRIDGE_SWITCH_E2E=true pytest tests/integration/switch/test_e2e.py -v
-    
+
     # Full test including sync mode (~10 minutes)
     LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true pytest tests/integration/switch/test_e2e.py -v
+
+    # Debug mode (keep resources for inspection)
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_KEEP_AFTER=true pytest tests/integration/switch/test_e2e.py -v
+
+    # CI mode (clean environment before tests)
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE=true pytest tests/integration/switch/test_e2e.py -v
+
+    # Debug with clean start (clean before, keep after)
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE=true LAKEBRIDGE_SWITCH_KEEP_AFTER=true pytest tests/integration/switch/test_e2e.py -v
 """
 import json
 import logging
@@ -88,220 +97,218 @@ class TestSwitchE2E:
     @pytest.fixture(autouse=True)
     def setup_and_cleanup(self, workspace_client):
         """Ensure clean state before and after tests"""
-        # Debug: Log environment variable state
-        force_cleanup_env = os.getenv("LAKEBRIDGE_SWITCH_FORCE_CLEANUP")
-        logger.info(f"LAKEBRIDGE_SWITCH_FORCE_CLEANUP environment variable: '{force_cleanup_env}'")
+        clean_all_before = os.getenv("LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE") == "true"
+        keep_after = os.getenv("LAKEBRIDGE_SWITCH_KEEP_AFTER") == "true"
         
-        # Setup: Comprehensive cleanup if force cleanup is enabled
-        if force_cleanup_env == "true":
-            logger.info("Force cleanup enabled - performing comprehensive Switch job cleanup")
+        logger.info(f"Cleanup settings: clean_all_before={clean_all_before}, keep_after={keep_after}")
+
+        # Setup: Perform cleanup before tests
+        if clean_all_before:
+            logger.info("Performing comprehensive Switch job cleanup before tests")
             self._cleanup_all_switch_jobs(workspace_client)
         else:
-            logger.info(f"Force cleanup disabled (env='{force_cleanup_env}') - skipping comprehensive cleanup")
-        
-        # Setup: Clean any existing Switch installation (legacy cleanup)
-        job_id = _get_switch_job_id()
-        if job_id:
-            logger.info(f"Cleaning up existing Switch job {job_id} before test")
-            try:
-                from switch.api.installer import SwitchInstaller
-                installer = SwitchInstaller(workspace_client)
-                result = installer.uninstall(job_id=job_id)
-                logger.info(f"Cleanup result: {result.message}")
-            except ImportError:
-                # Switch not yet installed, use direct cleanup
-                self._cleanup_databricks_job(workspace_client, job_id)
+            # Standard cleanup: Clean any existing Switch installation
+            job_id = _get_switch_job_id()
+            if job_id:
+                logger.info(f"Cleaning up existing Switch job {job_id} before test")
+                try:
+                    from switch.api.installer import SwitchInstaller
+                    installer = SwitchInstaller(workspace_client)
+                    result = installer.uninstall(job_id=job_id)
+                    logger.info(f"Cleanup result: {result.message}")
+                except ImportError:
+                    # Switch not yet installed, use direct cleanup
+                    self._cleanup_databricks_job(workspace_client, job_id)
 
-        # Clean local files
-        self._cleanup_local_switch_files()
+            # Clean local files
+            self._cleanup_local_switch_files()
 
         yield
 
         # Teardown: Clean up test artifacts
-        job_id = _get_switch_job_id()
-        if job_id and os.getenv("LAKEBRIDGE_SWITCH_KEEP_RESOURCES") != "true":
-            logger.info(f"Cleaning up Switch job {job_id} after test")
-            self._uninstall_switch(workspace_client)
+        if keep_after:
+            logger.info("Keeping resources for debugging")
+        else:
+            logger.info("Cleaning up Switch resources after test")
+            self._cleanup_switch_completely(workspace_client)
 
     # ==================== Main Test Methods ====================
 
-    def test_complete_lifecycle(self, workspace_client, pypi_source):
-        """Test: Install → Reinstall → Transpile → Uninstall"""
-        logger.info(f"Starting Switch E2E test with PyPI source: {pypi_source}")
+    def test_install_lifecycle(self, workspace_client, pypi_source):
+        """Test Switch installation lifecycle: Install → Reinstall → Uninstall
+        
+        This test verifies:
+        - Fresh installation works correctly
+        - Reinstallation properly cleans up previous installation
+        - Uninstallation removes all resources
+        """
+        logger.info(f"Starting Switch installation lifecycle test with PyPI source: {pypi_source}")
 
         # Step 1: Install Switch
         logger.info("Step 1: Installing Switch transpiler")
-        job_id = self._install_and_verify_switch(workspace_client, pypi_source)
+        job_id = self._setup_switch_for_test(workspace_client, pypi_source)
         logger.info(f"Switch installed successfully with job ID: {job_id}")
 
         # Step 2: Reinstall (test cleanup of previous installation)
         logger.info("Step 2: Testing reinstallation with cleanup")
         old_job_id = job_id
+        new_job_id = self._setup_switch_for_test(workspace_client, pypi_source)
 
-        self._install_switch(pypi_source)
-
-        # Verify new installation
-        new_job_id = _get_switch_job_id()
-        assert new_job_id is not None, "Switch job ID not found after reinstallation"
         assert new_job_id != old_job_id, "New job ID should be different from old one"
-        assert self._verify_job_exists(workspace_client, new_job_id), f"New job {new_job_id} not found"
-
-        # Note: Old job cleanup verification is skipped as Switch installer handles this
-        # and there may be timing issues with immediate verification
         logger.info(f"Reinstallation successful. Old job {old_job_id} cleaned up, new job {new_job_id} created")
 
-        # Step 3: Transpile simple SQL (async)
-        logger.info("Step 3: Testing async transpilation")
+        # Step 3: Uninstall and verify
+        logger.info("Step 3: Testing uninstallation")
+        self._cleanup_switch_completely(workspace_client)
 
-        # Create test SQL in workspace
-        input_dir, output_dir = self._create_workspace_test_dirs(workspace_client, "async")
-        self._upload_test_sql(workspace_client, input_dir, "SELECT * FROM customers WHERE age > 21")
+        assert _get_switch_job_id() is None, "Switch config should be removed"
+        assert not self._verify_job_exists(workspace_client, new_job_id), f"Job {new_job_id} should be deleted"
+        logger.info("Uninstallation successful")
+
+    def test_transpile_async(self, workspace_client, pypi_source):
+        """Test asynchronous transpilation with Switch
+
+        This test verifies:
+        - Install Switch (if needed)
+        - Execute async transpilation (~30 seconds)
+        - Verify job submission and run ID
+
+        Note: Respects KEEP_AFTER for debugging
+        """
+        logger.info(f"Starting async transpilation test with PyPI source: {pypi_source}")
+
+        # Step 1: Install Switch
+        logger.info("Step 1: Installing Switch transpiler")
+        job_id = self._setup_switch_for_test(workspace_client, pypi_source)
+        logger.info(f"Switch installed successfully with job ID: {job_id}")
+
+        # Step 2: Execute asynchronous transpilation
+        logger.info("Step 2: Testing asynchronous transpilation")
+        input_dir, output_dir = self._setup_test_workspace(
+            workspace_client, "async", "SELECT * FROM customers WHERE age > 21"
+        )
 
         try:
-            result = self._execute_switch_transpilation(
-                workspace_client,
-                source_dialect="snowflake",
-                input_source=input_dir,
-                output_folder=output_dir
-            )
+            result = self._run_switch_transpilation(workspace_client, {
+                "source_dialect": "snowflake",
+                "input_source": input_dir,
+                "output_folder": output_dir,
+                "wait_for_completion": False
+            })
 
             # Verify async execution result
             assert result["transpiler"] == "switch"
-            assert result["job_id"] == new_job_id
+            assert result["job_id"] == job_id
             assert "run_id" in result
             assert "run_url" in result
             logger.info(f"Async transpilation started with run ID: {result['run_id']}")
 
         finally:
-            self._cleanup_workspace_test_dir(workspace_client, input_dir)
-
-        # Step 4: Uninstall
-        logger.info("Step 4: Testing uninstallation")
-        self._uninstall_switch(workspace_client)
-
-        # Verify uninstallation
-        assert _get_switch_job_id() is None, "Switch config should be removed"
-        assert not self._verify_job_exists(workspace_client, new_job_id), f"Job {new_job_id} should be deleted"
-        logger.info("Uninstallation successful")
+            self._cleanup_test_workspace(workspace_client, input_dir)
 
     @pytest.mark.slow
     @pytest.mark.skipif(
         os.getenv("LAKEBRIDGE_SWITCH_INCLUDE_SYNC") != "true",
         reason="Sync test skipped (takes ~10 min). Set LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true to run"
     )
-    def test_sync_transpilation_complete(self, workspace_client, pypi_source):
-        """Test complete synchronous transpilation lifecycle (independent)
+    def test_transpile_sync(self, workspace_client, pypi_source):
+        """Test synchronous transpilation with Switch
 
-        This is a complete independent test that:
-        1. Installs Switch
-        2. Configures sync mode
-        3. Executes synchronous transpilation
-        4. Verifies results
-        5. Uninstalls Switch
+        This test verifies:
+        - Install Switch (if needed)
+        - Execute sync transpilation (~10 minutes)
+        - Verify completion and output files
 
-        Why independent: Ensures sync test can run alone without dependencies on other tests.
-        Why separate from async test: Sync mode takes ~10 minutes vs ~30 seconds for async.
+        Note: Respects KEEP_AFTER for debugging
+        Why separate: Sync mode takes ~10 minutes vs ~30 seconds for async.
         """
-        logger.info(f"Starting independent sync transpilation test with PyPI source: {pypi_source}")
+        logger.info(f"Starting sync transpilation test with PyPI source: {pypi_source}")
 
         # Step 1: Install Switch
-        logger.info("Step 1: Installing Switch for sync test")
-        job_id = self._install_and_verify_switch(workspace_client, pypi_source)
-        logger.info(f"Switch installed for sync test with job ID: {job_id}")
+        logger.info("Step 1: Installing Switch transpiler")
+        job_id = self._setup_switch_for_test(workspace_client, pypi_source)
+        logger.info(f"Switch installed successfully with job ID: {job_id}")
+
+        # Step 2: Execute synchronous transpilation
+        logger.info("Step 2: Testing synchronous transpilation")
+        input_dir, output_dir = self._setup_test_workspace(
+            workspace_client, "sync", "SELECT 1 AS test_column"
+        )
 
         try:
-            # Step 2: Execute sync transpilation
-            logger.info("Step 2: Testing synchronous transpilation")
-            
-            # Create test SQL in workspace
-            input_dir, output_dir = self._create_workspace_test_dirs(workspace_client, "sync")
-            self._upload_test_sql(workspace_client, input_dir, "SELECT 1 AS test_column")
+            start_time = time.time()
 
-            try:
-                # Run sync transpile with wait_for_completion=True
-                start_time = time.time()
+            result = self._run_switch_transpilation(workspace_client, {
+                "source_dialect": "snowflake",
+                "input_source": input_dir,
+                "output_folder": output_dir,
+                "wait_for_completion": True
+            })
 
-                result = self._execute_switch_transpilation(
-                    workspace_client,
-                    source_dialect="snowflake",
-                    input_source=input_dir,
-                    output_folder=output_dir,
-                    wait_for_completion=True  # Enable synchronous execution
-                )
+            elapsed_time = time.time() - start_time
+            logger.info(f"Sync transpilation completed in {elapsed_time:.1f} seconds")
 
-                elapsed_time = time.time() - start_time
-                logger.info(f"Sync transpilation completed in {elapsed_time:.1f} seconds")
+            # Verify sync execution result
+            assert result["transpiler"] == "switch"
+            assert result["job_id"] == job_id
+            assert "state" in result
+            assert "result_state" in result
+            assert result["state"] in ["TERMINATED", "SKIPPED"]
 
-                # Step 3: Verify sync execution result
-                assert result["transpiler"] == "switch"
-                assert result["job_id"] == job_id
-                assert "state" in result
-                assert "result_state" in result
-                assert result["state"] in ["TERMINATED", "SKIPPED"]
-
-                # Check output was created
-                output_items = workspace_client.workspace.list(output_dir)
-                output_count = sum(1 for _ in output_items)
-                assert output_count > 0, "No output files created"
-                logger.info(f"Sync transpilation successful with state: {result['state']}")
-
-            finally:
-                # Clean up workspace test directory
-                self._cleanup_workspace_test_dir(workspace_client, input_dir)
+            # Check output was created
+            output_items = workspace_client.workspace.list(output_dir)
+            output_count = sum(1 for _ in output_items)
+            assert output_count > 0, "No output files created"
+            logger.info(f"Sync transpilation successful with state: {result['state']}")
 
         finally:
-            # Step 4: Uninstall Switch
-            logger.info("Step 4: Cleaning up sync test")
-            self._uninstall_switch(workspace_client)
-            
-            # Verify cleanup
-            assert _get_switch_job_id() is None, "Switch config should be removed after sync test"
-            logger.info("Sync test cleanup completed successfully")
+            self._cleanup_test_workspace(workspace_client, input_dir)
 
     # ==================== Installation Methods ====================
 
-    def _install_and_verify_switch(self, workspace_client, pypi_source):
-        """Install Switch and verify the installation"""
+    def _setup_switch_for_test(self, workspace_client, pypi_source):
+        """Set up Switch for testing (install + verify in one operation)
+
+        Args:
+            workspace_client: Databricks workspace client
+            pypi_source: "testpypi" or "pypi"
+
+        Returns:
+            str: Switch job ID
+
+        Raises:
+            ValueError: If installation or verification fails
+        """
+        logger.info(f"Setting up Switch for test with PyPI source: {pypi_source}")
+
         try:
-            self._install_switch(pypi_source)
+            # Install Switch based on PyPI source
+            if pypi_source == "pypi":
+                output = self._run_cli_command("install-transpile")
+                logger.info(f"PyPI install output: {output}")
+            else:
+                self._install_switch_from_testpypi()
+                logger.info("TestPyPI installation completed via direct API")
         except Exception as e:
-            logger.error(f"Installation failed: {e}")
-            # Check if Switch package is available for debugging
+            logger.error(f"Switch installation failed: {e}")
+            # Debug: Check if Switch package is available
             try:
                 import switch
-                logger.info(f"Switch package is installed at: {switch.__file__}")
+                logger.info(f"Switch package found at: {switch.__file__}")
             except ImportError:
-                logger.error("Switch package not found after installation")
-            raise
+                logger.error("Switch package not available after installation")
+            raise ValueError(f"Failed to install Switch: {e}") from e
 
-        # Verify installation
+        # Verify installation success
         job_id = _get_switch_job_id()
         if job_id is None:
             raise ValueError("Switch job ID not found after installation")
 
         if not self._verify_job_exists(workspace_client, job_id):
-            raise ValueError(f"Job {job_id} not found in workspace")
+            raise ValueError(f"Switch job {job_id} not found in workspace")
 
+        logger.info(f"Switch setup completed successfully with job ID: {job_id}")
         return job_id
-
-    def _install_switch(self, pypi_source):
-        """Install Switch transpiler from specified PyPI source
-
-        Args:
-            pypi_source: "testpypi" or "pypi"
-
-        Note:
-            For TestPyPI, installs package first then runs lakebridge install-transpile.
-            For PyPI, runs install-transpile directly which handles package installation.
-        """
-        if pypi_source == "pypi":
-            # For production PyPI, use standard install
-            output = self._run_cli_command("install-transpile")
-        else:
-            self._install_switch_from_testpypi()
-            output = "Switch installation completed via direct API call"
-
-        logger.info(f"Install output: {output}")
 
     def _install_switch_from_testpypi(self):
         """Install Switch from TestPyPI with proper setup
@@ -371,15 +378,19 @@ class TestSwitchE2E:
 
     # ==================== Execution Methods ====================
 
-    def _execute_switch_transpilation(self, workspace_client, source_dialect, input_source, output_folder, wait_for_completion=False):
-        """Execute Switch transpilation using direct API
+    def _run_switch_transpilation(self, workspace_client, test_config):
+        """Execute Switch transpilation with unified interface for test scenarios
 
         Args:
             workspace_client: Databricks workspace client
-            source_dialect: SQL source dialect
-            input_source: Input directory path
-            output_folder: Output directory path  
-            wait_for_completion: If True, wait for job completion (sync mode)
+            test_config: Dict containing transpilation parameters:
+                - source_dialect: SQL source dialect
+                - input_source: Input directory path
+                - output_folder: Output directory path
+                - wait_for_completion: If True, run synchronously (default: False)
+
+        Returns:
+            dict: Switch execution result
 
         Why bypass CLI: The CLI's path validation assumes local filesystem paths,
         but Switch requires Databricks workspace paths like /Workspace/Users/...
@@ -388,6 +399,12 @@ class TestSwitchE2E:
         from databricks.labs.lakebridge.config import TranspileConfig
         from databricks.labs.lakebridge.contexts.application import ApplicationContext
         from databricks.labs.lakebridge.cli import _execute_switch_directly
+
+        # Extract parameters with defaults
+        source_dialect = test_config["source_dialect"]
+        input_source = test_config["input_source"]
+        output_folder = test_config["output_folder"]
+        wait_for_completion = test_config.get("wait_for_completion", False)
 
         # Prepare transpiler options for sync/async control
         transpiler_options = {}
@@ -407,9 +424,11 @@ class TestSwitchE2E:
         # Execute Switch directly
         ctx = ApplicationContext(workspace_client)
         execution_mode = "synchronous" if wait_for_completion else "asynchronous"
-        logger.info(f"Testing Switch execution directly ({execution_mode} mode)")
+        logger.info(f"Executing Switch transpilation ({execution_mode} mode)")
+        logger.debug(f"Test config: {test_config}")
+
         result = _execute_switch_directly(ctx, config)
-        logger.info(f"Direct Switch execution result: {result}")
+        logger.info(f"Switch execution result: {result}")
 
         return result
 
@@ -437,15 +456,53 @@ class TestSwitchE2E:
 
     # ==================== Cleanup Methods ====================
 
+    def _cleanup_switch_completely(self, workspace_client):
+        """Complete Switch cleanup (unified interface for all cleanup operations)
+
+        This method provides a single entry point for all Switch cleanup operations,
+        combining job cleanup, local files cleanup, and configuration cleanup.
+
+        Args:
+            workspace_client: Databricks workspace client
+        """
+        logger.info("Starting complete Switch cleanup")
+
+        try:
+            # Primary cleanup using SwitchInstaller if available
+            job_id = _get_switch_job_id()
+            if job_id:
+                logger.info(f"Found Switch job {job_id}, initiating cleanup")
+                self._uninstall_switch(workspace_client)
+            else:
+                logger.info("No Switch job ID found, skipping job cleanup")
+
+            # Ensure local files are cleaned up
+            self._cleanup_local_switch_files()
+
+            logger.info("Complete Switch cleanup finished successfully")
+
+        except Exception as e:
+            logger.error(f"Error during complete Switch cleanup: {e}")
+            # Continue with manual cleanup as fallback
+            logger.info("Attempting manual cleanup as fallback")
+            try:
+                if job_id:
+                    self._cleanup_databricks_job(workspace_client, job_id)
+                self._cleanup_local_switch_files()
+                logger.info("Manual cleanup completed")
+            except Exception as fallback_error:
+                logger.error(f"Manual cleanup also failed: {fallback_error}")
+                raise
+
     def _cleanup_all_switch_jobs(self, workspace_client):
         """Clean up all Switch jobs for current user
-        
+
         This method scans all jobs in the workspace and deletes Switch jobs
         belonging to the current user. Useful for cleaning up orphaned jobs
         from previous test runs.
         """
         logger.info("=== Starting comprehensive Switch job cleanup ===")
-        
+
         try:
             # Get current user and create job name pattern
             current_user = workspace_client.current_user.me().user_name
@@ -453,22 +510,22 @@ class TestSwitchE2E:
             username_local = current_user.split('@')[0]
             username_pattern = username_local.replace('.', '_')
             job_name_prefix = f"lakebridge-switch {username_pattern}"
-            
+
             logger.info(f"Current user: {current_user}")
             logger.info(f"Username pattern: {username_pattern}")
             logger.info(f"Job name prefix to match: '{job_name_prefix}'")
-            
+
             # Find all Switch jobs for current user
             logger.info("Fetching all jobs from workspace...")
             switch_jobs = []
             all_jobs = []
-            
+
             try:
                 job_count = 0
                 for job in workspace_client.jobs.list():
                     job_count += 1
                     all_jobs.append(job)
-                    
+
                     if job.settings and job.settings.name:
                         logger.debug(f"Job {job.job_id}: '{job.settings.name}' - checking against '{job_name_prefix}'")
                         if job.settings.name.startswith(job_name_prefix):
@@ -478,32 +535,32 @@ class TestSwitchE2E:
                             logger.debug(f"NO MATCH: Job {job.job_id}: '{job.settings.name}'")
                     else:
                         logger.debug(f"Job {job.job_id}: No name or settings")
-                        
+
                 logger.info(f"Total jobs scanned: {job_count}")
                 logger.info(f"All job names (first 10):")
                 for i, job in enumerate(all_jobs[:10]):
                     name = job.settings.name if (job.settings and job.settings.name) else "<no name>"
                     logger.info(f"  {i+1}. Job {job.job_id}: '{name}'")
-                    
+
             except Exception as e:
                 logger.error(f"Error listing jobs: {e}")
                 return
-                
+
             if not switch_jobs:
                 logger.info("No Switch jobs found to clean up")
                 logger.info("=== Comprehensive cleanup completed (no jobs found) ===")
                 return
-                
+
             logger.info(f"Found {len(switch_jobs)} Switch job(s) to clean up:")
             for job in switch_jobs:
                 logger.info(f"  - Job ID: {job.job_id}, Name: '{job.settings.name}'")
-            
+
             # Delete each Switch job safely
             deleted_count = 0
             for job in switch_jobs:
                 try:
                     logger.info(f"Processing job {job.job_id}: '{job.settings.name}'")
-                    
+
                     # Check if job is currently running
                     try:
                         runs = list(workspace_client.jobs.list_runs(job_id=job.job_id, active_only=True))
@@ -515,18 +572,18 @@ class TestSwitchE2E:
                     except Exception as e:
                         logger.warning(f"Could not check active runs for job {job.job_id}: {e}")
                         logger.info(f"Proceeding with deletion of job {job.job_id}")
-                    
+
                     # Delete the job
                     logger.info(f"Deleting job {job.job_id}...")
                     workspace_client.jobs.delete(job.job_id)
                     logger.info(f"✓ Successfully deleted Switch job {job.job_id}: '{job.settings.name}'")
                     deleted_count += 1
-                    
+
                 except Exception as e:
                     logger.error(f"✗ Failed to delete job {job.job_id}: {e}")
-                    
+
             logger.info(f"=== Comprehensive cleanup completed: {deleted_count}/{len(switch_jobs)} jobs deleted ===")
-            
+
         except Exception as e:
             logger.error(f"Error during comprehensive Switch job cleanup: {e}")
             logger.error(f"=== Comprehensive cleanup failed ===", exc_info=True)
@@ -581,8 +638,20 @@ class TestSwitchE2E:
 
     # ==================== Workspace Operations ====================
 
-    def _create_workspace_test_dirs(self, workspace_client, test_type):
-        """Create test directories in workspace"""
+    def _setup_test_workspace(self, workspace_client, test_type, sql_content):
+        """Set up test workspace environment (create directories + upload SQL)
+
+        Args:
+            workspace_client: Databricks workspace client
+            test_type: Test type identifier ("async", "sync", etc.)
+            sql_content: SQL content to upload for testing
+
+        Returns:
+            tuple: (input_dir, output_dir) paths
+        """
+        from databricks.sdk.service.workspace import ImportFormat
+
+        # Create test directories
         current_user = workspace_client.current_user.me().user_name
         test_base_dir = f"/Workspace/Users/{current_user}/.lakebridge-switch-e2e-{test_type}"
         input_dir = f"{test_base_dir}/input_{int(time.time())}"
@@ -591,29 +660,36 @@ class TestSwitchE2E:
         # Create directories
         workspace_client.workspace.mkdirs(input_dir)
         workspace_client.workspace.mkdirs(output_dir)
+        logger.debug(f"Created test directories: {input_dir}, {output_dir}")
 
-        return input_dir, output_dir
-
-    def _upload_test_sql(self, workspace_client, input_dir, sql_content):
-        """Upload test SQL file to workspace"""
-        from databricks.sdk.service.workspace import ImportFormat
+        # Upload SQL file
         sql_path = f"{input_dir}/test.sql"
         workspace_client.workspace.upload(
             path=sql_path,
             content=sql_content.encode('utf-8'),
             format=ImportFormat.AUTO
         )
-        logger.debug(f"Uploaded SQL file to {sql_path}")
+        logger.debug(f"Uploaded SQL file to {sql_path} with content: {sql_content[:50]}...")
 
-    def _cleanup_workspace_test_dir(self, workspace_client, path):
-        """Clean up workspace test directory"""
-        try:
-            # Get parent directory (test_base_dir)
-            parent_dir = str(Path(path).parent)
-            workspace_client.workspace.delete(parent_dir, recursive=True)
-            logger.debug(f"Cleaned up workspace directory: {parent_dir}")
-        except Exception as e:
-            logger.debug(f"Failed to clean up workspace directory: {e}")
+        return input_dir, output_dir
+
+    def _cleanup_test_workspace(self, workspace_client, *paths):
+        """Clean up test workspace environment (delete multiple paths safely)
+
+        Args:
+            workspace_client: Databricks workspace client
+            *paths: List of paths to clean up
+        """
+        for path in paths:
+            if not path:
+                continue
+            try:
+                # Get parent directory and delete recursively
+                parent_dir = str(Path(path).parent)
+                workspace_client.workspace.delete(parent_dir, recursive=True)
+                logger.debug(f"Cleaned up workspace directory: {parent_dir}")
+            except Exception as e:
+                logger.debug(f"Failed to clean up workspace directory {path}: {e}")
 
     # ==================== Utility Methods ====================
 
