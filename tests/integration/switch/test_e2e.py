@@ -20,10 +20,12 @@ Key Challenges Addressed:
 
 Environment Variables:
 - LAKEBRIDGE_SWITCH_E2E=true: Enable E2E tests (disabled by default)
-- LAKEBRIDGE_SWITCH_PYPI_SOURCE: "testpypi" (default) or "pypi"
-- LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true: Include slow synchronous tests
-- LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE=true: Clean up all Switch jobs before tests
-- LAKEBRIDGE_SWITCH_KEEP_AFTER=true: Keep resources after tests (for debugging)
+- LAKEBRIDGE_SWITCH_E2E_PYPI_SOURCE: "testpypi" (default) or "pypi"
+- LAKEBRIDGE_SWITCH_E2E_INCLUDE_SYNC=true: Include slow synchronous tests
+- LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE=true: Clean up all Switch jobs before tests
+- LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER=true: Keep resources after tests (for debugging)
+- LAKEBRIDGE_SWITCH_E2E_CATALOG: Custom catalog name (default: "remorph")
+- LAKEBRIDGE_SWITCH_E2E_SCHEMA: Custom schema name (default: "transpiler")
 - DATABRICKS_HOST & DATABRICKS_TOKEN: Workspace credentials
 
 Usage:
@@ -31,16 +33,19 @@ Usage:
     LAKEBRIDGE_SWITCH_E2E=true pytest tests/integration/switch/test_e2e.py -v
 
     # Full test including sync mode (~10 minutes)
-    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true pytest tests/integration/switch/test_e2e.py -v
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_INCLUDE_SYNC=true pytest tests/integration/switch/test_e2e.py -v
 
     # Debug mode (keep resources for inspection)
-    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_KEEP_AFTER=true pytest tests/integration/switch/test_e2e.py -v
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER=true pytest tests/integration/switch/test_e2e.py -v
 
     # CI mode (clean environment before tests)
-    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE=true pytest tests/integration/switch/test_e2e.py -v
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE=true pytest tests/integration/switch/test_e2e.py -v
 
     # Debug with clean start (clean before, keep after)
-    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE=true LAKEBRIDGE_SWITCH_KEEP_AFTER=true pytest tests/integration/switch/test_e2e.py -v
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE=true LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER=true pytest tests/integration/switch/test_e2e.py -v
+
+    # Custom catalog and schema
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_CATALOG=my_catalog LAKEBRIDGE_SWITCH_E2E_SCHEMA=my_schema pytest tests/integration/switch/test_e2e.py -v
 """
 import json
 import logging
@@ -80,7 +85,7 @@ class TestSwitchE2E:
     @pytest.fixture(scope="class")
     def pypi_source(self):
         """Determine PyPI source from environment"""
-        return os.getenv("LAKEBRIDGE_SWITCH_PYPI_SOURCE", "testpypi")
+        return os.getenv("LAKEBRIDGE_SWITCH_E2E_PYPI_SOURCE", "testpypi")
 
     @pytest.fixture(scope="class")
     def workspace_client(self):
@@ -96,8 +101,8 @@ class TestSwitchE2E:
     @pytest.fixture(autouse=True)
     def setup_and_cleanup(self, workspace_client):
         """Ensure clean state before and after tests"""
-        clean_all_before = os.getenv("LAKEBRIDGE_SWITCH_CLEAN_ALL_BEFORE") == "true"
-        keep_after = os.getenv("LAKEBRIDGE_SWITCH_KEEP_AFTER") == "true"
+        clean_all_before = os.getenv("LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE") == "true"
+        keep_after = os.getenv("LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER") == "true"
         
         logger.info(f"Cleanup settings: clean_all_before={clean_all_before}, keep_after={keep_after}")
 
@@ -207,8 +212,8 @@ class TestSwitchE2E:
 
     @pytest.mark.slow
     @pytest.mark.skipif(
-        os.getenv("LAKEBRIDGE_SWITCH_INCLUDE_SYNC") != "true",
-        reason="Sync test skipped (takes ~10 min). Set LAKEBRIDGE_SWITCH_INCLUDE_SYNC=true to run"
+        os.getenv("LAKEBRIDGE_SWITCH_E2E_INCLUDE_SYNC") != "true",
+        reason="Sync test skipped (takes ~10 min). Set LAKEBRIDGE_SWITCH_E2E_INCLUDE_SYNC=true to run"
     )
     def test_transpile_sync(self, workspace_client, pypi_source):
         """Test synchronous transpilation with Switch
@@ -405,6 +410,12 @@ class TestSwitchE2E:
         output_folder = test_config["output_folder"]
         wait_for_completion = test_config.get("wait_for_completion", False)
 
+        # Get catalog and schema from environment variables or test config
+        catalog_name = (test_config.get("catalog_name") or 
+                       os.getenv("LAKEBRIDGE_SWITCH_E2E_CATALOG", "remorph"))
+        schema_name = (test_config.get("schema_name") or 
+                      os.getenv("LAKEBRIDGE_SWITCH_E2E_SCHEMA", "transpiler"))
+
         # Prepare transpiler options for sync/async control
         transpiler_options = {}
         if wait_for_completion:
@@ -416,6 +427,8 @@ class TestSwitchE2E:
             source_dialect=source_dialect,
             input_source=input_source,
             output_folder=output_folder,
+            catalog_name=catalog_name,
+            schema_name=schema_name,
             skip_validation=True,  # Skip path validation for workspace paths
             transpiler_options=transpiler_options
         )
