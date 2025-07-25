@@ -193,7 +193,7 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
                 "transpiler": "switch",
                 "job_id": job_id,
                 "run_id": run.run_id if run.run_id else None,
-                "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run.run_id}",
+                "run_url": f"{ctx.workspace_client.config.host}/jobs/{job_id}/runs/{run.run_id}",
                 "state": run.state.life_cycle_state.value if run.state and run.state.life_cycle_state else "UNKNOWN",
                 "result_state": run.state.result_state.value if run.state and run.state.result_state else None,
             }
@@ -207,7 +207,7 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
                 "transpiler": "switch",
                 "job_id": job_id,
                 "run_id": run_id,
-                "run_url": f"{ctx.workspace_client.config.host}/#job/{job_id}/run/{run_id}",
+                "run_url": f"{ctx.workspace_client.config.host}/jobs/{job_id}/runs/{run_id}",
             }
 
     except ImportError as import_error:
@@ -250,9 +250,7 @@ def transpile(
     logger.debug(f"Final configuration for transpilation: {config!r}")
 
     # Check if this is a Switch transpiler request
-    if (_is_switch_available() and 
-        _is_switch_request(config.transpiler_config_path)):
-
+    if (_is_switch_available() and _is_switch_request(config.transpiler_config_path)):
         logger.info("Switch transpiler detected - using Jobs API execution")
         result = _execute_switch_directly(ctx, config)
         print(json.dumps(result))
