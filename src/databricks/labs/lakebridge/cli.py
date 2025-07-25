@@ -103,6 +103,124 @@ def _verify_workspace_client(ws: WorkspaceClient) -> WorkspaceClient:
     return ws
 
 
+def _is_switch_available() -> bool:
+    """Check if Switch transpiler is installed and available."""
+    try:
+        available_transpilers = TranspilerInstaller.all_transpiler_names()
+        return "switch" in available_transpilers
+    except Exception:
+        return False
+
+
+def _is_switch_request(transpiler_config_path: str | None) -> bool:
+    """Determine if this is an explicit Switch transpiler request via config path."""
+    return transpiler_config_path and "switch" in transpiler_config_path.lower()
+
+
+def _get_switch_job_id() -> int | None:
+    """Get Switch job ID from config.yml."""
+    try:
+        import yaml
+
+        # First check if the config file exists in the expected location
+        transpilers_path = TranspilerInstaller.transpilers_path()
+        switch_config_path = transpilers_path / "switch" / "lib" / "config.yml"
+        
+        if not switch_config_path.exists():
+            # Fallback: try to get from TranspilerInstaller if available
+            try:
+                config_path = TranspilerInstaller.transpiler_config_path("switch")
+            except ValueError:
+                return None
+        else:
+            config_path = switch_config_path
+            
+        with open(config_path, 'r') as f:
+            config_data = yaml.safe_load(f)
+
+        return config_data.get('custom', {}).get('job_id')
+    except Exception:
+        return None
+
+
+def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -> dict:
+    """Execute Switch transpiler using existing workspace job."""
+    try:
+        from switch.api.job_runner import SwitchJobRunner
+        from switch.api.job_parameters import SwitchJobParameters
+
+        logger.info("Executing Switch transpiler using Jobs API")
+
+        # Get job ID from config first
+        job_id = _get_switch_job_id()
+        if not job_id:
+            raise ValueError(
+                "Switch job not found. Please run 'lakebridge install-transpiler' first."
+            )
+
+        # Create Switch job parameters - let Switch handle comprehensive validation
+        switch_params = SwitchJobParameters(
+            input_dir=config.input_source,
+            output_dir=config.output_folder,
+            result_catalog=config.catalog_name,
+            result_schema=config.schema_name,
+            sql_dialect=config.source_dialect,
+        )
+
+        # Use Switch's comprehensive validation with require_all=True
+        try:
+            switch_params.validate(require_all=True)
+        except ValueError as validation_error:
+            raise ValueError(f"Switch parameter validation failed: {validation_error}") from validation_error
+
+        # Initialize job runner
+        job_runner = SwitchJobRunner(ctx.workspace_client, job_id)
+
+        # Check wait_for_completion from transpiler_options
+        wait_for_completion = False
+        if config.transpiler_options and isinstance(config.transpiler_options, dict):
+            wait_option = config.transpiler_options.get("wait_for_completion", "false")
+            wait_for_completion = str(wait_option).lower() == "true"
+
+        # Run job based on wait preference
+        if wait_for_completion:
+            logger.info(f"Starting Switch job {job_id} (waiting for completion)...")
+            run = job_runner.run_sync(switch_params)
+            logger.info(f"Switch job completed with run ID: {run.run_id}")
+
+            # Format detailed result for synchronous execution
+            return {
+                "transpiler": "switch",
+                "job_id": job_id,
+                "run_id": run.run_id if run.run_id else None,
+                "run_url": f"{ctx.workspace_client.config.host}/jobs/{job_id}/runs/{run.run_id}",
+                "state": run.state.life_cycle_state.value if run.state and run.state.life_cycle_state else "UNKNOWN",
+                "result_state": run.state.result_state.value if run.state and run.state.result_state else None,
+            }
+        else:
+            logger.info(f"Starting Switch job {job_id}...")
+            run_id = job_runner.run_async(switch_params)
+            logger.info(f"Switch job started with run ID: {run_id}")
+            
+            # Format result for asynchronous execution
+            return {
+                "transpiler": "switch",
+                "job_id": job_id,
+                "run_id": run_id,
+                "run_url": f"{ctx.workspace_client.config.host}/jobs/{job_id}/runs/{run_id}",
+            }
+
+    except ImportError as import_error:
+        logger.debug(f"Switch import failed: {import_error}")
+        raise ValueError(
+            "Switch transpiler is not properly installed. "
+            "Please install using 'lakebridge install-transpiler' or ensure 'databricks-switch-plugin' package is available."
+        ) from import_error
+    except Exception as e:
+        logger.error(f"Failed to execute Switch transpiler: {e}")
+        raise RuntimeError(f"Switch execution failed: {e}") from e
+
+
 @lakebridge.command
 def transpile(
     w: WorkspaceClient,
@@ -130,6 +248,13 @@ def transpile(
     checker.use_schema_name(schema_name)
     config, engine = checker.check()
     logger.debug(f"Final configuration for transpilation: {config!r}")
+
+    # Check if this is a Switch transpiler request
+    if (_is_switch_available() and _is_switch_request(config.transpiler_config_path)):
+        logger.info("Switch transpiler detected - using Jobs API execution")
+        result = _execute_switch_directly(ctx, config)
+        print(json.dumps(result))
+        return
 
     assert config.source_dialect is not None, "Source dialect has been validated by this point."
     with_user_agent_extra("transpiler_source_tech", make_alphanum_or_semver(config.source_dialect))

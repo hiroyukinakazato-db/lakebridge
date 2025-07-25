@@ -518,6 +518,7 @@ class WorkspaceInstaller:
         elif module in {"transpile", "all"}:
             self.install_bladebridge()
             self.install_morpheus()
+            self.install_switch()
         if not config:
             config = self.configure(module)
         if self._is_testing():
@@ -543,6 +544,125 @@ class WorkspaceInstaller:
         group_id = "com.databricks.labs"
         artifact_id = product_name
         TranspilerInstaller.install_from_maven(product_name, group_id, artifact_id, artifact)
+
+    def install_switch(self, artifact: Path | None = None):
+        """Install Switch transpiler with workspace deployment."""
+        local_name = "switch"
+        pypi_name = "databricks-switch-plugin"
+
+        # Step 1: Install from PyPI
+        TranspilerInstaller.install_from_pypi(local_name, pypi_name, artifact)
+
+        # Step 2: Extract previous installation info for cleanup
+        previous_job_id, previous_switch_home = self._get_previous_switch_installation()
+
+        # Step 3: Deploy to workspace and create job (with automatic cleanup)
+        try:
+            from switch.api.installer import SwitchInstaller
+
+            logger.info("Deploying Switch to workspace...")
+            if previous_job_id or previous_switch_home:
+                logger.info(f"Previous installation detected - will clean up job_id={previous_job_id}, switch_home={previous_switch_home}")
+            
+            switch_installer = SwitchInstaller(self._ws)
+            install_result = switch_installer.install(
+                previous_job_id=previous_job_id,
+                previous_switch_home=previous_switch_home
+            )
+
+            # Step 4: Update config.yml with job information
+            self._update_switch_config(install_result)
+            logger.info(f"Switch deployed successfully. Job ID: {install_result.job_id}")
+
+            # Step 5: Display installation details to user
+            self._display_switch_installation_details(install_result)
+
+        except ImportError:
+            logger.warning("Switch package not available for workspace deployment. PyPI installation completed.")
+        except Exception as e:
+            logger.error(f"Failed to deploy Switch to workspace: {e}")
+            raise RuntimeError(f"Switch workspace deployment failed: {e}") from e
+
+    def _read_switch_config(self) -> dict | None:
+        """Read Switch config.yml file.
+        
+        Returns:
+            dict: Parsed config data or None if reading fails
+        """
+        try:
+            import yaml
+            config_path = TranspilerInstaller.transpiler_config_path("switch")
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except Exception:
+            return None
+
+    def _get_previous_switch_installation(self) -> tuple[int | None, str | None]:
+        """Extract previous Switch installation info from config for cleanup.
+        
+        Returns:
+            tuple: (previous_job_id, previous_switch_home) or (None, None) if not found
+        """
+        config_data = self._read_switch_config()
+        if not config_data:
+            logger.debug("No previous Switch installation found or config read failed")
+            return None, None
+        
+        custom = config_data.get('custom', {})
+        previous_job_id = custom.get('job_id')
+        previous_switch_home = custom.get('switch_home')
+        
+        if previous_job_id is not None or previous_switch_home is not None:
+            logger.debug(f"Found previous Switch installation: job_id={previous_job_id}, switch_home={previous_switch_home}")
+        
+        return previous_job_id, previous_switch_home
+
+    def _update_switch_config(self, install_result):
+        """Update Switch config.yml with job deployment information."""
+        config_data = self._read_switch_config()
+        if not config_data:
+            logger.warning("Failed to read Switch config for update")
+            return
+
+        # Update custom section with job information
+        if 'custom' not in config_data:
+            config_data['custom'] = {}
+
+        config_data['custom'].update({
+            'job_id': install_result.job_id,
+            'job_name': install_result.job_name,
+            'job_url': install_result.job_url,
+            'switch_home': install_result.switch_home,
+            'created_by': install_result.created_by
+        })
+
+        # Write updated config back
+        try:
+            import yaml
+            config_path = TranspilerInstaller.transpiler_config_path("switch")
+            with open(config_path, 'w') as f:
+                yaml.dump(config_data, f, default_flow_style=False)
+
+            logger.debug(f"Updated Switch config with job info: {config_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to update Switch config with job info: {e}")
+
+    def _display_switch_installation_details(self, install_result):
+        """Display Switch installation details to user"""
+        config_path = TranspilerInstaller.transpiler_config_path("switch")
+        lines = [
+            "",
+            "Switch deployed successfully!",
+            f"Job Name: {install_result.job_name}",
+            f"Job ID: {install_result.job_id}",
+            f"Job URL: {install_result.job_url}",
+            f"Created by: {install_result.created_by}",
+            f"Switch home: {install_result.switch_home}",
+            f"Transpiler config: {config_path}",
+            ""
+        ]
+        print("\n".join(lines))
 
     @classmethod
     def is_java_version_okay(cls) -> bool:
@@ -574,6 +694,8 @@ class WorkspaceInstaller:
             cls.install_morpheus(path)
         elif "databricks_bb_plugin" in path.name:
             cls.install_bladebridge(path)
+        elif "databricks-switch-plugin" in path.name:
+            cls.install_switch(path)
         else:
             logger.fatal(f"Cannot install unsupported artifact: {artifact}")
 
