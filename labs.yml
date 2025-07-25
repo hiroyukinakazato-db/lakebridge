@@ -22,19 +22,19 @@ commands:
     description: Transpile SQL script to Databricks SQL
     flags:
       - name: transpiler-config-path
-        description: Path to the transpiler configuration file
+        description: Path to the transpiler configuration file [Pluggable Transpilers] eg:- Morpheus/Bladebridge
         default: null
       - name: source-dialect
-        description: Dialect name
+        description: Dialect name as selected during `install-transpile` or refer to documentation
         default: null
       - name: input-source
         description: Input Script Folder or File
         default: null
       - name: output-folder
-        description: Output Location For Storing Transpiled Code, defaults to input-source folder
+        description: Output Location For Storing Transpiled Code, defaults to (Current Working Directory) `<pwd>/transpiled` folder
         default: null
       - name: error-file-path
-        description: Output Location For Storing Errors, defaults to input-source folder
+        description: Output Location For Storing Errors, defaults to (Current Working Directory) `<pwd>/errors.log`
         default: null
       - name: skip-validation
         description: Validate Transpiled Code, default True validation skipped, False validate
