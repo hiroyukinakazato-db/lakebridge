@@ -1,0 +1,204 @@
+---
+title: Switch Overview
+sidebar_position: 4
+---
+
+import CodeBlock from '@theme/CodeBlock';
+
+**Switch** is an LLM-powered SQL conversion tool that transforms SQL files from various dialects into Databricks notebooks using Large Language Models.
+
+Unlike transpilers that use deterministic rules, Switch leverages LLMs to understand SQL semantics and generate idiomatic Databricks code.
+
+---
+
+## Key Differentiators
+
+### LLM-Based Conversion
+- Uses [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) endpoints
+- Understands context and intent beyond syntax
+- Generates idiomatic Databricks code
+
+### Batch Processing via Jobs API
+- Executes as Databricks Jobs (not LSP)
+- Processes multiple SQL files in parallel
+- Provides job monitoring and status tracking
+
+### Notebook-First Output
+- Generates Databricks notebooks (.py format) containing Python code with embedded Spark SQL
+- Includes markdown documentation cells
+- Preserves comments in target language
+
+---
+
+## Supported SQL Dialects
+
+Switch supports conversion from 8 major SQL dialects:
+
+| SQL Dialect | Source Systems |
+|------------|----------------|
+| **MySQL** | MySQL, MariaDB, Amazon Aurora MySQL |
+| **Netezza** | IBM Netezza |
+| **Oracle** | Oracle Database, Oracle Exadata |
+| **PostgreSQL** | PostgreSQL, Amazon Aurora PostgreSQL |
+| **Redshift** | Amazon Redshift |
+| **Snowflake** | Snowflake |
+| **Teradata** | Teradata |
+| **T-SQL** | Azure Synapse Analytics, Microsoft SQL Server, Azure SQL Database |
+
+---
+
+## Conversion Architecture
+
+### Processing Pipeline
+
+Switch uses a 6-stage pipeline to convert SQL files:
+
+1. **Analyze Input Files** - Scans SQL files and calculates token counts
+2. **Convert to Databricks** - Uses LLM to transform SQL to Python/Spark
+3. **Syntax Validation** - Checks Python and embedded SQL syntax
+4. **Error Correction** - Uses LLM to fix any syntax errors
+5. **Cell Splitting** - Organizes code into logical notebook cells
+6. **Export Notebooks** - Writes final Databricks notebooks
+
+### State Management
+
+- Tracks conversion progress in Delta tables
+- Enables restart and retry capabilities
+- Provides detailed conversion metrics
+
+---
+
+## Use Cases
+
+### When to Use Switch
+
+Switch's LLM-based approach makes it particularly suitable for:
+- Complex stored procedures and ETL logic
+- SQL dialects not covered by LSP-based transpilers (you can add support through custom YAML prompts)
+
+### When to Use LSP-based Transpilers
+
+⚡ **Consider LSP transpilers for:**
+- Real-time, interactive conversion
+- Deterministic output requirements
+- Sub-second response requirements
+
+---
+
+## Integration with Lakebridge
+
+Switch integrates seamlessly with Lakebridge through:
+
+- Standard `install-transpiler` command
+- Unified `transpile` CLI interface
+- PyPI-based distribution
+- Workspace-based file management
+
+See the [Transpile Guide](./index.mdx#switch-specific-usage) for detailed usage instructions.
+
+---
+
+## Advanced Features
+
+### Customizable Prompts
+- You can create custom YAML prompts to support new SQL dialects
+- Dialect-specific conversion rules
+- Few-shot learning examples
+
+### Multi-Language Comments
+- Generate comments in various languages
+- Preserves original documentation intent
+- Configurable via `--comment-lang`
+
+### Experimental SQL Notebooks
+- Optional conversion to SQL notebook format
+- Maintains Spark SQL compatibility
+- Enable with `--sql-output-dir`
+
+---
+
+## Technical Requirements
+
+### Model Serving Endpoint
+- Requires access to Databricks Model Serving
+- Default: `databricks-claude-sonnet-4`
+- Configurable via `--endpoint-name`
+
+### Workspace Permissions
+- Read access to input SQL files
+- Write access to output directory
+- Job creation permissions
+- Delta table creation in specified catalog/schema
+
+---
+
+## Installation & Usage
+
+### Installation
+
+When you run `databricks labs lakebridge install-transpiler`:
+
+1. Switch is automatically installed along with other transpilers
+2. A Databricks Job is created in your authenticated workspace
+3. Switch notebooks are uploaded to the workspace
+4. During configuration, you can select a SQL dialect from Switch's supported dialects, or configure it later
+
+The installation details (including job URL) are saved in the transpiler configuration file:
+- **macOS/Linux**: `~/.databricks/labs/remorph-transpilers/switch/lib/config.yml`
+- **Windows**: `%USERPROFILE%\.databricks\labs\remorph-transpilers\switch\lib\config.yml`
+
+The installation process prepares Switch to run as Databricks Jobs for batch SQL conversion.
+
+### Basic Usage
+
+Switch requires workspace-based paths and executes via Databricks Jobs. Use the `--transpiler-config-path` to specify Switch:
+
+```bash
+# Minimal execution
+databricks labs lakebridge transpile \
+  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
+  --input-source /Workspace/Users/myuser/sql_source \
+  --output-folder /Workspace/Users/myuser/notebooks \
+  --catalog-name my_catalog \
+  --schema-name switch_results
+
+# With SQL dialect specification
+databricks labs lakebridge transpile \
+  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
+  --input-source /Workspace/Shared/migration/sql \
+  --output-folder /Workspace/Shared/migration/notebooks \
+  --source-dialect snowflake \
+  --catalog-name migration_catalog \
+  --schema-name switch_results
+```
+
+### Parameters Reference
+
+The `transpile` command accepts the following parameters:
+
+#### Standard Transpile Parameters
+- `--transpiler-config-path` - Path to Switch config file (required to use Switch)
+- `--input-source` - Workspace path containing SQL files (required)
+- `--output-folder` - Workspace path for generated notebooks (required)
+- `--source-dialect` - Source SQL dialect: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql` (optional, default from config)
+- `--catalog-name` - Databricks catalog for result table (optional, default: `remorph`)
+- `--schema-name` - Databricks schema for result table (optional, default: `transpiler`)
+
+#### Switch-Specific Behavior
+When Switch is detected (via transpiler-config-path), it uses these parameters to configure a Databricks Job execution. Switch internally manages additional parameters like:
+- Model serving endpoint configuration
+- Token count thresholds
+- Concurrency settings
+- Language preferences for comments
+
+These are configured during installation or via the Switch config.yml file.
+
+### Job Monitoring
+
+Switch returns a job run URL for monitoring progress:
+
+```
+Switch job submitted successfully.
+Job Run URL: https://your-workspace.databricks.com/#job/12345/run/67890
+Monitor job progress at the provided URL.
+```
