@@ -1,7 +1,7 @@
 """End-to-end tests for Switch transpiler integration with Lakebridge
 
 Switch is a Databricks-native SQL transpiler that uses LLMs to convert SQL between dialects.
-Unlike traditional transpilers (BladeRunner, Morpheus) that use LSP, Switch runs as a 
+Unlike other existing transpilers (BladeRunner, Morpheus) that use LSP, Switch runs as a 
 Databricks job, making it scalable and cloud-native.
 
 This module contains three types of tests:
@@ -19,10 +19,10 @@ Key Challenges Addressed:
   this gracefully without failing on timing issues.
 
 Environment Variables:
-- LAKEBRIDGE_SWITCH_E2E=true: Enable E2E tests (disabled by default)
+- LAKEBRIDGE_SWITCH_E2E=true: Enable E2E tests of this module (disabled by default)
 - LAKEBRIDGE_SWITCH_E2E_PYPI_SOURCE: "testpypi" (default) or "pypi"
 - LAKEBRIDGE_SWITCH_E2E_INCLUDE_SYNC=true: Include slow synchronous tests
-- LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE=true: Clean up all Switch jobs before tests
+- LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE=true: Clean up all existing Switch jobs before tests
 - LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER=true: Keep resources after tests (for debugging)
 - LAKEBRIDGE_SWITCH_E2E_CATALOG: Custom catalog name (default: "remorph")
 - LAKEBRIDGE_SWITCH_E2E_SCHEMA: Custom schema name (default: "transpiler")
@@ -516,16 +516,13 @@ class TestSwitchE2E:
         logger.info("=== Starting comprehensive Switch job cleanup ===")
 
         try:
-            # Get current user and create job name pattern
+            # Get current user for tag-based ownership check
             current_user = workspace_client.current_user.me().user_name
-            # Extract username part (before @) and replace dots with underscores
-            username_local = current_user.split('@')[0]
-            username_pattern = username_local.replace('.', '_')
-            job_name_prefix = f"lakebridge-switch {username_pattern}"
+            job_name = "lakebridge-switch"  # Fixed job name (no user suffix)
+            created_by_tag = "created_by"    # Tag key for ownership
 
             logger.info(f"Current user: {current_user}")
-            logger.info(f"Username pattern: {username_pattern}")
-            logger.info(f"Job name prefix to match: '{job_name_prefix}'")
+            logger.info(f"Looking for Switch jobs with name: '{job_name}' and created_by tag: '{current_user}'")
 
             # Find all Switch jobs for current user
             logger.info("Fetching all jobs from workspace...")
@@ -539,12 +536,21 @@ class TestSwitchE2E:
                     all_jobs.append(job)
 
                     if job.settings and job.settings.name:
-                        logger.debug(f"Job {job.job_id}: '{job.settings.name}' - checking against '{job_name_prefix}'")
-                        if job.settings.name.startswith(job_name_prefix):
-                            logger.info(f"MATCH: Job {job.job_id}: '{job.settings.name}'")
-                            switch_jobs.append(job)
+                        logger.debug(f"Job {job.job_id}: '{job.settings.name}' - checking name and tags")
+
+                        # Check if job name matches Switch job name
+                        if job.settings.name == job_name:
+                            # Check if created_by tag matches current user
+                            if (job.settings.tags and 
+                                created_by_tag in job.settings.tags and 
+                                job.settings.tags[created_by_tag] == current_user):
+                                logger.info(f"MATCH: Job {job.job_id}: '{job.settings.name}' (created_by: {job.settings.tags[created_by_tag]})")
+                                switch_jobs.append(job)
+                            else:
+                                created_by_value = job.settings.tags.get(created_by_tag, "<no tag>") if job.settings.tags else "<no tags>"
+                                logger.debug(f"NO MATCH (owner): Job {job.job_id}: '{job.settings.name}' (created_by: {created_by_value})")
                         else:
-                            logger.debug(f"NO MATCH: Job {job.job_id}: '{job.settings.name}'")
+                            logger.debug(f"NO MATCH (name): Job {job.job_id}: '{job.settings.name}'")
                     else:
                         logger.debug(f"Job {job.job_id}: No name or settings")
 

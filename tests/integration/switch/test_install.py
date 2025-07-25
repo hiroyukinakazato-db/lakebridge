@@ -71,8 +71,10 @@ def mock_install_result():
     """Mock SwitchInstaller.install() result"""
     result = MagicMock()
     result.job_id = 123456789
-    result.job_name = "switch-sql-converter"
+    result.job_name = "lakebridge-switch"
+    result.job_url = "https://test.databricks.com/jobs/123456789"
     result.switch_home = "/Workspace/Users/test/.lakebridge-switch"
+    result.created_by = "test@databricks.com"
     return result
 
 
@@ -211,8 +213,13 @@ class TestSwitchInstallationProcess:
                 )
                 installer = mock_workspace_installer(ws)
 
-                # Execute workspace deployment (this calls SwitchInstaller.install())
-                installer.install_switch()
+                # Mock the display method to avoid stdout during tests
+                with patch.object(installer, '_display_switch_installation_details') as mock_display:
+                    # Execute workspace deployment (this calls SwitchInstaller.install())
+                    installer.install_switch()
+
+                    # Verify display method was called with install result
+                    mock_display.assert_called_once_with(mock_install_result)
 
                 # Verify SwitchInstaller was called with workspace client
                 mock_switch_installer_class.assert_called_once_with(ws)
@@ -253,7 +260,9 @@ class TestSwitchInstallationProcess:
 
             assert custom['job_id'] == mock_install_result.job_id
             assert custom['job_name'] == mock_install_result.job_name
+            assert custom['job_url'] == mock_install_result.job_url
             assert custom['switch_home'] == mock_install_result.switch_home
+            assert custom['created_by'] == mock_install_result.created_by
 
             # Verify original TestPyPI config was preserved
             assert updated_config['remorph']['name'] == 'switch'
@@ -323,8 +332,13 @@ class TestSwitchInstallationProcess:
                 )
                 installer = mock_workspace_installer(ws)
 
-                # Execute installation - should detect and pass previous installation info
-                installer.install_switch()
+                # Mock the display method to avoid stdout during tests
+                with patch.object(installer, '_display_switch_installation_details') as mock_display:
+                    # Execute installation - should detect and pass previous installation info
+                    installer.install_switch()
+
+                    # Verify display method was called with install result
+                    mock_display.assert_called_once_with(mock_install_result)
 
                 # Verify SwitchInstaller.install was called with previous installation info
                 mock_installer.install.assert_called_once_with(
@@ -338,6 +352,8 @@ class TestSwitchInstallationProcess:
 
                 assert updated_config['custom']['job_id'] == mock_install_result.job_id
                 assert updated_config['custom']['job_name'] == mock_install_result.job_name
+                assert updated_config['custom']['job_url'] == mock_install_result.job_url
                 assert updated_config['custom']['switch_home'] == mock_install_result.switch_home
+                assert updated_config['custom']['created_by'] == mock_install_result.created_by
 
                 logger.info(f"Previous installation (job_id=999888777) cleaned up and new installation completed (job_id={mock_install_result.job_id})")

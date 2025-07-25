@@ -574,6 +574,9 @@ class WorkspaceInstaller:
             self._update_switch_config(install_result)
             logger.info(f"Switch deployed successfully. Job ID: {install_result.job_id}")
 
+            # Step 5: Display installation details to user
+            self._display_switch_installation_details(install_result)
+
         except ImportError:
             logger.warning("Switch package not available for workspace deployment. PyPI installation completed.")
         except Exception as e:
@@ -628,7 +631,9 @@ class WorkspaceInstaller:
         config_data['custom'].update({
             'job_id': install_result.job_id,
             'job_name': install_result.job_name,
+            'job_url': install_result.job_url,
             'switch_home': install_result.switch_home,
+            'created_by': install_result.created_by
         })
 
         # Write updated config back
@@ -642,6 +647,22 @@ class WorkspaceInstaller:
 
         except Exception as e:
             logger.warning(f"Failed to update Switch config with job info: {e}")
+
+    def _display_switch_installation_details(self, install_result):
+        """Display Switch installation details to user"""
+        config_path = TranspilerInstaller.transpiler_config_path("switch")
+        lines = [
+            "",
+            "Switch deployed successfully!",
+            f"Job Name: {install_result.job_name}",
+            f"Job ID: {install_result.job_id}",
+            f"Job URL: {install_result.job_url}",
+            f"Created by: {install_result.created_by}",
+            f"Switch home: {install_result.switch_home}",
+            f"Transpiler config: {config_path}",
+            ""
+        ]
+        print("\n".join(lines))
 
     @classmethod
     def is_java_version_okay(cls) -> bool:
