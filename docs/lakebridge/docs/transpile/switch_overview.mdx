@@ -5,56 +5,94 @@ sidebar_position: 4
 
 import CodeBlock from '@theme/CodeBlock';
 
-**Switch** is a Lakebridge transpiler plugin that takes a fundamentally different approach to SQL conversion by leveraging Large Language Models (LLMs). Instead of using parsing and rule-based transformation like traditional transpilers, Switch uses [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) to understand the intent and semantics of SQL code and generate equivalent Databricks notebooks.
+**Switch** is a Lakebridge transpiler plugin that uses Large Language Models (LLMs) to convert SQL code into Databricks notebooks. Switch leverages [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) to understand SQL intent and semantics, generating equivalent Python notebooks with Spark SQL.
 
-Switch's LLM-powered approach is particularly effective for complex stored procedures, business logic, and ETL workflows where understanding context and intent matters more than strict syntactic transformation. While the generated notebooks may require manual adjustments, they provide a valuable starting point for migration to Databricks.
+This LLM-powered approach excels at converting complex stored procedures, business logic, and ETL workflows where context and intent matter more than syntactic transformation. While generated notebooks may require manual adjustments, they provide a valuable foundation for Databricks migration.
 
 ---
 
 ## How Switch Works
 
-### LLM-Powered Conversion
-Switch uses [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) instead of traditional parsing rules. This enables:
+Switch operates through three key components that distinguish it from rule-based transpilers:
 
-- **Semantic Understanding**: Interprets SQL intent and context, not just syntax
-- **Flexible Dialect Support**: Handles proprietary SQL extensions and complex business logic
-- **Custom Prompts**: Extensible through YAML-based prompts for specialized requirements
+### LLM-Powered Semantic Understanding
+Instead of parsing rules, Switch uses [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) to:
+- Interpret SQL intent and business context beyond syntax
+- Handle proprietary SQL extensions and complex logic patterns
+- Support extensible conversion through custom YAML prompts
 
-### Built on Databricks Platform
-Switch leverages native Databricks services:
+### Native Databricks Integration
+Switch runs entirely within the Databricks platform:
+- **Jobs API**: Executes as scalable Databricks Jobs for batch processing
+- **Delta Tables**: Tracks conversion progress with restart capabilities  
+- **Model Serving**: Direct integration with Databricks LLM endpoints
+- **Parallel Processing**: Leverages cluster resources for multiple files
 
-- **Jobs API**: Executes as Databricks Jobs for scalable batch processing
-- **Delta Tables**: Tracks conversion progress and enables restart capabilities  
-- **Model Serving**: Integrates directly with Databricks LLM endpoints
-- **Compute Resources**: Processes multiple files in parallel using cluster resources
+### Flexible Output Formats
+- **Primary Output**: Python notebooks containing Spark SQL
+- **Experimental**: SQL notebook conversion for pure SQL workflows
 
-### Notebook Output
-Switch generates **Python notebooks** containing Spark SQL as the primary output, with an experimental **SQL notebook** conversion feature for teams preferring pure SQL workflows.
+---
+
+## Prerequisites & Requirements
+
+Before installing and using Switch, ensure your Databricks environment meets these requirements:
+
+### Databricks Workspace Setup
+
+**Job Execution Environment**
+- **Job Creation Permission**: Ability to create and manage Databricks Jobs
+  - A Switch job is automatically created during `install-transpile` execution
+- **Compute Access**: Switch creates jobs using serverless job compute by default
+  - If serverless is unavailable, you can modify job configuration in the Databricks workspace to use classic job compute
+
+**Data Storage Requirements**
+- **Catalog Access**: Existing catalog for Switch state management tables
+  - Unity Catalog catalogs (recommended) or Hive metastore catalogs supported
+  - Default catalog name: `remorph`
+- **Schema Access**: Existing schema within the specified catalog
+  - Default schema name: `transpiler`
+- **Table Creation Permission**: `CREATE TABLE` rights on the catalog and schema
+  - Switch creates Delta tables for conversion state and intermediate results
+
+### Model Serving Access
+
+**LLM Endpoint Requirements**
+- **Foundation Model API**: Default endpoint is `databricks-claude-sonnet-4`
+- **Custom Endpoints**: You can configure custom or external model serving endpoints
+- **Token Quota**: Sufficient quota for your conversion workload
+- **Permissions**: Query access to the configured model serving endpoint
+
+### Databricks Runtime (for Classic Job Compute)
+- **Default**: Serverless job compute (no runtime configuration required)
+- **Classic Job Compute**: If using classic clusters instead of serverless:
+  - **Verified Versions**: DBR 14.3 LTS or 15.3 LTS (higher versions likely compatible)
+  - **Compute Type**: Single-node clusters recommended (Photon not required)
 
 ---
 
 ## SQL Dialect Support
 
-Switch includes **built-in sample conversion prompts** for 8 major SQL dialects. You can also create custom conversion prompts to support additional SQL dialects or specialized requirements.
+Switch provides built-in sample conversion prompts for 8 major SQL dialects, with extensibility for custom dialects through YAML configuration.
 
 ### Built-in Sample Conversion Prompts
 
 | SQL Dialect | Source Systems |
 |-------------|----------------|
-| **MySQL** | MySQL, MariaDB, Amazon Aurora MySQL |
+| **MySQL** | MySQL, MariaDB, and MySQL-compatible services (including Amazon Aurora MySQL, RDS, Google Cloud SQL) |
 | **Netezza** | IBM Netezza |
-| **Oracle** | Oracle Database, Oracle Exadata |
-| **PostgreSQL** | PostgreSQL, Amazon Aurora PostgreSQL |
+| **Oracle** | Oracle Database, Oracle Exadata, and Oracle-compatible services (including Amazon RDS) |
+| **PostgreSQL** | PostgreSQL and PostgreSQL-compatible services (including Amazon Aurora PostgreSQL, RDS, Google Cloud SQL) |
 | **Redshift** | Amazon Redshift |
 | **Snowflake** | Snowflake |
 | **Teradata** | Teradata |
-| **T-SQL** | Azure Synapse Analytics, Microsoft SQL Server, Azure SQL Database |
+| **T-SQL** | Microsoft SQL Server, Azure SQL family (Database, Managed Instance, Synapse Analytics), Amazon RDS for SQL Server |
 
 ### Custom Dialect Support
 
-Switch's LLM-based approach allows you to support additional SQL dialects by creating custom YAML conversion prompts. This makes Switch extensible beyond the built-in dialects listed above.
+Switch's LLM-based architecture supports additional SQL dialects through custom YAML conversion prompts, making it extensible beyond built-in options.
 
-For details on creating custom prompts, see the [Advanced Usage](#advanced-usage) section.
+For custom prompt creation, see the [Advanced Usage](#advanced-usage) section.
 
 ---
 
@@ -62,53 +100,59 @@ For details on creating custom prompts, see the [Advanced Usage](#advanced-usage
 
 ### Installation
 
-Switch integrates with Lakebridge's transpiler ecosystem. To install Switch:
+Switch integrates with the Lakebridge transpiler ecosystem:
 
 ```bash
 databricks labs lakebridge install-transpile
 ```
 
-During installation:
+The installation automatically:
 
-1. **Automatic Setup**: Switch is installed along with other transpilers
-2. **Workspace Integration**: A Databricks Job is created in your authenticated workspace  
-3. **Notebook Deployment**: Switch processing notebooks are uploaded to the workspace
-4. **Dialect Configuration**: You can select a SQL dialect during installation or configure it later
+1. **Installs Switch**: Alongside other transpilers
+2. **Creates Databricks Job**: In your authenticated workspace  
+3. **Uploads Notebooks**: Switch processing notebooks to workspace
 
-The installation details are saved in the `custom` section in the transpiler configuration file as shown below:
-- **macOS/Linux**: `~/.databricks/labs/remorph-transpilers/switch/lib/config.yml` 
+Configuration is saved to:
+- **macOS/Linux**: `~/.databricks/labs/remorph-transpilers/switch/lib/config.yml`
 - **Windows**: `%USERPROFILE%\.databricks\labs\remorph-transpilers\switch\lib\config.yml`
 
-### Basic CLI Usage
+### CLI Usage
 
-Switch uses the standard Lakebridge transpile command. To specify Switch as your transpiler, use the `--transpiler-config-path` parameter:
+Use the following command to run Switch. Specifying the Switch config file with `--transpiler-config-path` tells Lakebridge to use Switch as the transpiler:
 
 ```bash
-# Basic Switch usage
+# Switch usage
 databricks labs lakebridge transpile \
   --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
-  --input-source /Workspace/Shared/migration/sql \
-  --output-folder /Workspace/Shared/migration/notebooks \
+  --input-source /Workspace/path/to/sql \
+  --output-folder /Workspace/path/to/notebooks \
   --source-dialect snowflake \
-  --catalog-name migration_catalog \
-  --schema-name switch_results
+  --catalog-name your_existing_catalog \
+  --schema-name your_existing_schema
 ```
 
-Switch requires **workspace-based paths** and executes as Databricks Jobs rather than local processing. By default, Switch runs **asynchronously** and returns a job URL for monitoring. You can configure it to wait for completion by updating the `wait_for_completion` setting.
+For advanced configuration options, see [Advanced Configuration](#advanced-configuration) below.
+
+#### Operational Notes
+
+Switch operates differently from other Lakebridge transpilers:
+
+- **Databricks Workspace Paths Required**: Input and output paths must be workspace paths (e.g., `/Workspace/path/to/...`) rather than local file paths
+- **Jobs API Execution**: Switch runs as a Databricks Job in your workspace, not as a local process
+- **Asynchronous by Default**: The command returns immediately with a job URL, allowing you to monitor progress in the Databricks workspace
+- **Monitoring**: Use the returned job URL to track conversion progress and view logs
 
 ### CLI Parameters
-
-The `transpile` command supports these parameters when using Switch:
 
 #### Required Parameters
 - `--transpiler-config-path` - Path to Switch configuration file (identifies Switch as the transpiler)
 - `--input-source` - Workspace path containing SQL files to convert
-- `--output-folder` - Workspace path where generated notebooks will be saved
-- `--source-dialect` - SQL dialect of input files: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql` (defaults to configuration file setting)
-- `--catalog-name` - Databricks catalog for conversion state tables (default: `remorph`). Must already exist in your workspace.
-- `--schema-name` - Databricks schema for conversion state tables (default: `transpiler`). Must already exist within the specified catalog.
+- `--output-folder` - Workspace path for generated notebooks
+- `--source-dialect` - SQL dialect: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql`
+- `--catalog-name` - Databricks catalog for state tables (default: `remorph`). Must already exist.
+- `--schema-name` - Databricks schema for state tables (default: `transpiler`). Must already exist.
 
-**Permission Requirements**: The executing user must have `CREATE TABLE` permissions on the specified catalog and schema, as Switch creates Delta tables to track conversion progress and store intermediate results.
+**Permission Requirements**: The user must have `CREATE TABLE` permissions on the specified catalog and schema for Switch's state management and intermediate result tables.
 
 #### Advanced Configuration
 
@@ -129,7 +173,7 @@ Switch provides detailed configuration options that can be set during installati
 
 **Configuration Methods**:
 1. **During Installation**: Configure options when running `databricks labs lakebridge install-transpile`
-2. **Direct File Edit**: Modify the `config.yml` file at the installation path and execute `databricks labs lakebridge transpile`
+2. **Direct File Edit**: Modify the `config.yml` file at the installation path and then execute `databricks labs lakebridge transpile`
 
 ### Job Monitoring
 
@@ -174,7 +218,7 @@ Choose the approach based on your project's complexity, accuracy requirements, a
 #### Effective Switch Usage:
 1. **Start Small**: Begin with representative sample files
 2. **Iterate Prompts**: Refine YAML prompts based on initial results  
-3. **Review and Refine**: Treat Switch output as a good foundation and starting point
+3. **Review and Refine**: Treat output as a solid foundation requiring refinement
 4. **Document Patterns**: Capture successful prompt patterns for reuse
 
 ---
