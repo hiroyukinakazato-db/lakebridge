@@ -30,7 +30,7 @@ from databricks.labs.lakebridge.config import (
     TranspileConfig,
     ReconcileConfig,
     DatabaseConfig,
-    RemorphConfigs,
+    LakebridgeConfiguration,
     ReconcileMetadataConfig,
     LSPConfigOptionV1,
 )
@@ -511,7 +511,9 @@ class WorkspaceInstaller:
             msg = "WorkspaceInstaller is not supposed to be executed in Databricks Runtime"
             raise SystemExit(msg)
 
-    def run(self, module: str, config: RemorphConfigs | None = None, artifact: str | None = None) -> RemorphConfigs:
+    def run(
+        self, module: str, config: LakebridgeConfiguration | None = None, artifact: str | None = None
+    ) -> LakebridgeConfiguration:
         logger.debug(f"Initializing workspace installation for module: {module} (config: {config})")
         if module == "transpile" and artifact:
             self.install_artifact(artifact)
@@ -759,17 +761,17 @@ class WorkspaceInstaller:
         patch = int(match["patch"] or 0)
         return feature, interim, update, patch
 
-    def configure(self, module: str) -> RemorphConfigs:
+    def configure(self, module: str) -> LakebridgeConfiguration:
         match module:
             case "transpile":
                 logger.info("Configuring lakebridge `transpile`.")
-                return RemorphConfigs(self._configure_transpile(), None)
+                return LakebridgeConfiguration(self._configure_transpile(), None)
             case "reconcile":
                 logger.info("Configuring lakebridge `reconcile`.")
-                return RemorphConfigs(None, self._configure_reconcile())
+                return LakebridgeConfiguration(None, self._configure_reconcile())
             case "all":
                 logger.info("Configuring lakebridge `transpile` and `reconcile`.")
-                return RemorphConfigs(
+                return LakebridgeConfiguration(
                     self._configure_transpile(),
                     self._configure_reconcile(),
                 )

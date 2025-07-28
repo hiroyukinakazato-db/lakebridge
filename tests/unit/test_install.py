@@ -11,7 +11,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import iam
 from databricks.labs.blueprint.tui import MockPrompts
 from databricks.labs.lakebridge.config import (
-    RemorphConfigs,
+    LakebridgeConfiguration,
     ReconcileConfig,
     DatabaseConfig,
     ReconcileMetadataConfig,
@@ -100,12 +100,12 @@ def test_workspace_installer_run_install_not_called_in_test(ws_installer, ws):
     ws_installation = create_autospec(WorkspaceInstallation)
     ctx = ApplicationContext(ws)
     ctx.replace(
-        product_info=ProductInfo.for_testing(RemorphConfigs),
+        product_info=ProductInfo.for_testing(LakebridgeConfiguration),
         resource_configurator=create_autospec(ResourceConfigurator),
         workspace_installation=ws_installation,
     )
 
-    provided_config = RemorphConfigs()
+    provided_config = LakebridgeConfiguration()
     workspace_installer = ws_installer(
         ctx.workspace_client,
         ctx.prompts,
@@ -129,7 +129,7 @@ def test_workspace_installer_run_install_called_with_provided_config(ws_installe
         resource_configurator=create_autospec(ResourceConfigurator),
         workspace_installation=ws_installation,
     )
-    provided_config = RemorphConfigs()
+    provided_config = LakebridgeConfiguration()
     workspace_installer = ws_installer(
         ctx.workspace_client,
         ctx.prompts,
@@ -257,7 +257,7 @@ def test_configure_transpile_no_existing_installation(ws_installer, ws):
         catalog_name="remorph",
         schema_name="transpiler",
     )
-    expected_config = RemorphConfigs(transpile=expected_morph_config)
+    expected_config = LakebridgeConfiguration(transpile=expected_morph_config)
     assert config == expected_config
     installation.assert_file_written(
         "config.yml",
@@ -390,7 +390,7 @@ def test_configure_transpile_installation_config_error_continue_install(ws_insta
         catalog_name="remorph",
         schema_name="transpiler",
     )
-    expected_config = RemorphConfigs(transpile=expected_morph_config)
+    expected_config = LakebridgeConfiguration(transpile=expected_morph_config)
     assert config == expected_config
     installation.assert_file_written(
         "config.yml",
@@ -453,7 +453,7 @@ def test_configure_transpile_installation_with_no_validation(ws, ws_installer):
         catalog_name="remorph",
         schema_name="transpiler",
     )
-    expected_config = RemorphConfigs(transpile=expected_morph_config)
+    expected_config = LakebridgeConfiguration(transpile=expected_morph_config)
     assert config == expected_config
     installation.assert_file_written(
         "config.yml",
@@ -510,7 +510,7 @@ def test_configure_transpile_installation_with_validation_and_warehouse_id_from_
 
     config = workspace_installer.configure(module="transpile")
 
-    expected_config = RemorphConfigs(
+    expected_config = LakebridgeConfiguration(
         transpile=TranspileConfig(
             transpiler_config_path=PATH_TO_TRANSPILER_CONFIG,
             transpiler_options=None,
@@ -643,7 +643,7 @@ def test_configure_reconcile_installation_config_error_continue_install(ws):
     )
     config = workspace_installer.configure(module="reconcile")
 
-    expected_config = RemorphConfigs(
+    expected_config = LakebridgeConfiguration(
         reconcile=ReconcileConfig(
             data_source="oracle",
             report_type="all",
@@ -721,7 +721,7 @@ def test_configure_reconcile_no_existing_installation(ws):
     )
     config = workspace_installer.configure(module="reconcile")
 
-    expected_config = RemorphConfigs(
+    expected_config = LakebridgeConfiguration(
         reconcile=ReconcileConfig(
             data_source="snowflake",
             report_type="all",
@@ -870,7 +870,7 @@ def test_configure_all_override_installation(ws_installer, ws):
             volume="reconcile_volume",
         ),
     )
-    expected_config = RemorphConfigs(transpile=expected_transpile_config, reconcile=expected_reconcile_config)
+    expected_config = LakebridgeConfiguration(transpile=expected_transpile_config, reconcile=expected_reconcile_config)
     assert config == expected_config
     installation.assert_file_written(
         "config.yml",
@@ -973,7 +973,7 @@ def test_runs_upgrades_on_more_recent_version(ws_installer, ws):
     workspace_installer.run("transpile")
 
     mock_workspace_installation.install.assert_called_once_with(
-        RemorphConfigs(
+        LakebridgeConfiguration(
             transpile=TranspileConfig(
                 transpiler_config_path=PATH_TO_TRANSPILER_CONFIG,
                 transpiler_options=None,
@@ -1036,7 +1036,7 @@ def test_runs_and_stores_confirm_config_option(ws_installer, ws):
 
         config = workspace_installer.configure(module="transpile")
 
-        expected_config = RemorphConfigs(
+        expected_config = LakebridgeConfiguration(
             transpile=TranspileConfig(
                 transpiler_config_path=PATH_TO_TRANSPILER_CONFIG,
                 transpiler_options={"-experimental": True},
@@ -1110,7 +1110,7 @@ def test_runs_and_stores_force_config_option(ws_installer, ws):
 
     config = workspace_installer.configure(module="transpile")
 
-    expected_config = RemorphConfigs(
+    expected_config = LakebridgeConfiguration(
         transpile=TranspileConfig(
             transpiler_config_path=PATH_TO_TRANSPILER_CONFIG,
             transpiler_options={"-XX": 1254},
@@ -1185,7 +1185,7 @@ def test_runs_and_stores_question_config_option(ws_installer, ws):
 
     config = workspace_installer.configure(module="transpile")
 
-    expected_config = RemorphConfigs(
+    expected_config = LakebridgeConfiguration(
         transpile=TranspileConfig(
             transpiler_config_path=PATH_TO_TRANSPILER_CONFIG,
             transpiler_options={"-XX": 1254},
@@ -1265,7 +1265,7 @@ def test_runs_and_stores_choice_config_option(ws_installer, ws):
 
     config = workspace_installer.configure(module="transpile")
 
-    expected_config = RemorphConfigs(
+    expected_config = LakebridgeConfiguration(
         transpile=TranspileConfig(
             transpiler_config_path=PATH_TO_TRANSPILER_CONFIG,
             transpiler_options={"-currency": "GBP"},
