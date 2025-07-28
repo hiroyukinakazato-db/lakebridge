@@ -146,13 +146,26 @@ Switch operates differently from other Lakebridge transpilers:
 
 #### Required Parameters
 - `--transpiler-config-path` - Path to Switch configuration file (identifies Switch as the transpiler)
-- `--input-source` - Workspace path containing SQL files to convert
+- `--input-source` - Path(s) containing SQL files to convert (see Input Source Patterns below)
 - `--output-folder` - Workspace path for generated notebooks
 - `--source-dialect` - SQL dialect: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql`
 - `--catalog-name` - Databricks catalog for state tables (default: `remorph`). Must already exist.
 - `--schema-name` - Databricks schema for state tables (default: `transpiler`). Must already exist.
 
-**Permission Requirements**: The user must have `CREATE TABLE` permissions on the specified catalog and schema for Switch's state management and intermediate result tables.
+#### Input Source Patterns
+
+The `--input-source` parameter supports flexible path specifications:
+
+| Pattern Type | Example | Description |
+|-------------|---------|-------------|
+| **Single Directory** | `/Workspace/path/to/sql` | Process all files in specified directory recursively |
+| **Multiple Directories** | `/Workspace/project1/sql,/Workspace/project2/sql` | Process files from multiple directories recursively (comma-separated) |
+| **Glob Patterns** | `/Workspace/Users/*/sql/*.sql` | Use wildcards to match paths (`*` = any characters, `**` = recursive) |
+| **Mixed Patterns** | `/Workspace/prod/**/*.sql,/Workspace/dev/sql` | Combine different pattern types |
+
+#### Permission Requirements
+
+The user must have `CREATE TABLE` permissions on the specified catalog and schema for Switch's state management and intermediate result tables.
 
 #### Advanced Configuration
 
@@ -297,7 +310,7 @@ When Switch executes as a Databricks Job, CLI parameters are mapped to notebook 
 
 | CLI Parameter | Notebook Parameter | Description |
 |---------------|-------------------|-------------|
-| `--input-source` | `input_dir` | Directory containing SQL files |
+| `--input-source` | `input_dir` | Path(s) containing SQL files (supports patterns) |
 | `--output-folder` | `output_dir` | Directory for generated notebooks |
 | `--catalog-name` | `result_catalog` | Catalog for tracking tables |
 | `--schema-name` | `result_schema` | Schema for tracking tables |
