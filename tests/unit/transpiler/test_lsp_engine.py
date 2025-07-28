@@ -4,7 +4,6 @@ import logging
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from time import sleep
 import pytest
 
 from lsprotocol.types import TextEdit, Range, Position
@@ -21,10 +20,12 @@ from databricks.labs.lakebridge.transpiler.transpile_status import TranspileErro
 from tests.unit.conftest import path_to_resource
 
 
+# TODO: Arguably a form of integration test, as it round-trips with a real LSP server.
+
+
 async def test_initializes_lsp_server(lsp_engine, transpile_config):
     assert not lsp_engine.is_alive
     await lsp_engine.initialize(transpile_config)
-    sleep(3)
     assert lsp_engine.is_alive
 
 
@@ -94,14 +95,15 @@ async def test_server_has_transpile_capability(lsp_engine, transpile_config):
     assert lsp_engine.server_has_transpile_capability
 
 
-async def read_log(marker: str):
+async def read_log(marker: str) -> str:
+    # TODO: Fix this; logs should not be generated amongst the resources in our source tree.
     log_path = Path(path_to_resource("lsp_transpiler", "test-lsp-server.log"))
     # need to give time to child process
     for _ in range(1, 10):
-        await asyncio.sleep(0.1)
         log = log_path.read_text("utf-8")
         if marker in log:
-            break
+            return log
+        await asyncio.sleep(0.1)
     return log_path.read_text("utf-8")
 
 
