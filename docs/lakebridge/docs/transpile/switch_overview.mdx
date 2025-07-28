@@ -229,23 +229,16 @@ When you run Switch via the CLI, it executes as Databricks Jobs using a sophisti
 
 ### Processing Architecture
 
-Switch implements a 6-stage conversion pipeline through specialized Databricks notebooks:
+Switch executes as a Databricks Job that runs the main orchestration notebook (`00_main`), which coordinates a 6-stage conversion pipeline:
 
-| Stage | Notebook | Purpose |
-|-------|----------|---------|
-| **1** | `01_analyze_input_files` | Analyzes input SQL files, calculates token counts, saves results to Delta table |
-| **2** | `02_convert_sql_to_databricks` | Converts SQL to Python/Spark using LLM, updates result table |  
-| **3** | `03_01_static_syntax_check` | Performs syntax validation on generated Python and embedded SQL |
-| **4** | `03_02_fix_syntax_error` | Automatically fixes syntax errors using LLM |
-| **5** | `04_split_cells` | Organizes code into logical notebook cells |
-| **6** | `05_export_to_databricks_notebooks` | Creates final Databricks notebooks |
+#### Main Orchestration
+The **`00_main`** notebook serves as the entry point when Switch is executed via Databricks Jobs API. It:
+- Validates all input parameters from the job configuration
+- Executes each processing stage in sequence using `dbutils.notebook.run()`
+- Tracks overall progress and handles stage-level failures
+- Returns the final conversion status to the job runner
 
-#### Optional Processing
-
-- **`06_convert_to_sql_notebooks`** (Experimental) - Generates SQL notebook format
-- **`11_adjust_conversion_targets`** - Allows reprocessing specific files
-
-### Conversion Flow
+#### Conversion Flow
 
 ```mermaid
 flowchart TD
@@ -266,115 +259,154 @@ flowchart TD
     conversionTable -->|Input| export[[05_export_to_databricks_notebooks]]
     export -->|Output| notebooks[Converted Databricks Notebooks]
 
-    conversionTable <-->|Read & Write| adjust[[11_adjust_conversion_targets]]
-
     %% Styling
     classDef process fill:#E6E6FA,stroke:#333,stroke-width:2px;
-    class analyze,convert,validate,fixErrors,splitCells,adjust,export process;
+    class analyze,convert,validate,fixErrors,splitCells,export process;
     classDef data fill:#E0F0E0,stroke:#333,stroke-width:2px;
     class input,conversionTable,notebooks data;
     classDef external fill:#FFF0DB,stroke:#333,stroke-width:2px;
     class endpoint,prompts external;
 ```
 
+The conversion pipeline consists of 6 core stages plus 1 optional stage, each implemented as a separate Databricks notebook. The following sections provide detailed explanations of each processing stage shown in the flow above.
+
+##### Stage 1: File Analysis
+The pipeline begins by scanning your input directory for SQL files. It removes SQL comments to get accurate token counts using model-specific tokenizers (Claude uses ~3.4 characters per token, OpenAI uses tiktoken). Files exceeding the `token_count_threshold` are excluded from conversion. All metadata is stored in a timestamped Delta table for tracking.
+
+##### Stage 2: SQL Conversion
+The system loads dialect-specific YAML prompts (or your custom prompt) and sends SQL content to the configured model serving endpoint. Multiple files are processed concurrently (default: 4) for efficiency. The LLM transforms SQL code into Python code with `spark.sql()` calls, preserving business logic while adapting to Databricks patterns.
+
+##### Stage 3: Syntax Validation
+Before proceeding, all generated code undergoes rigorous validation. Python syntax is checked using `ast.parse()`, while SQL statements within `spark.sql()` calls are validated using Spark's `EXPLAIN` command. Any errors are recorded in the result table without modifying the code.
+
+##### Stage 4: Error Correction
+If syntax errors are detected, this stage attempts automatic fixes. It sends the error context back to the LLM, which suggests corrections. The process repeats up to `max_fix_attempts` times (default: 1). This stage only runs when errors exist from the previous validation.
+
+##### Stage 5: Cell Organization
+Raw converted code is transformed into a well-structured notebook. The system analyzes code flow and dependencies, splitting at logical boundaries like imports, function definitions, and major SQL operations. Markdown cells are added for documentation and readability.
+
+##### Stage 6: Notebook Export
+The final stage creates Databricks-compatible `.py` notebooks in your output directory. Each notebook includes metadata, source file references, and any syntax check results as comments. The system handles files up to 10MB and preserves your directory structure.
+
+##### Stage 7: SQL Notebook Conversion (Optional)
+When `sql_output_dir` is specified, this experimental stage uses the model serving endpoint to convert Python notebooks into SQL notebook format with Databricks SQL syntax. This is useful for teams preferring SQL-only workflows, though some Python logic may be lost in translation.
+
+### Parameter Mapping
+
+When Switch executes as a Databricks Job, CLI parameters are mapped to notebook parameters:
+
+| CLI Parameter | Notebook Parameter | Description |
+|---------------|-------------------|-------------|
+| `--input-source` | `input_dir` | Directory containing SQL files |
+| `--output-folder` | `output_dir` | Directory for generated notebooks |
+| `--catalog-name` | `result_catalog` | Catalog for tracking tables |
+| `--schema-name` | `result_schema` | Schema for tracking tables |
+| `--source-dialect` | `sql_dialect` | Input SQL dialect |
+| `--transpiler-config-path` | (config file) | Loads additional parameters from Switch config |
+
+Additional parameters are configured through the Switch config file (see [Advanced Configuration](#advanced-configuration) above).
+
 ### State Management
 
-Switch uses Delta tables for robust state management:
+Switch uses a Delta table to track conversion progress and results. Each conversion job creates a timestamped table: `{catalog}.{schema}.conversion_targets_{YYYYMMDDHHmm}`
 
-- **Progress Tracking**: Records conversion status for each input file
-- **Restart Capability**: Failed jobs can resume from last successful stage
-- **Metrics Collection**: Detailed token usage and processing time data
-- **Error Tracking**: Comprehensive error logging for debugging
+The table stores input file information (path, content, token counts), conversion results (generated notebooks, token usage, processing time), error details when conversions fail, and syntax check results from validation stages. This allows you to monitor which files were processed successfully and investigate any issues that occurred during conversion.
 
-### Notebook-Level Configuration
+#### Conversion Result Table Schema
 
-While CLI parameters control basic settings, Switch notebooks accept detailed configuration:
+Switch creates Delta tables with the following complete schema:
 
-#### Core Processing Parameters
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `input_dir` | Directory containing SQL files | From CLI `--input-source` |
-| `endpoint_name` | Model serving endpoint | `databricks-claude-3-7-sonnet` |
-| `result_catalog` | Catalog for tracking tables | From CLI `--catalog-name` |
-| `result_schema` | Schema for tracking tables | From CLI `--schema-name` |
-| `token_count_threshold` | Max tokens per file | `20000` |
-
-#### LLM Processing Settings
-
-| Parameter | Description | Default |  
-|-----------|-------------|---------|
-| `sql_dialect` | Input SQL dialect | From CLI `--source-dialect` |
-| `comment_lang` | Generated comment language | `English` |
-| `concurrency` | Parallel LLM requests | `4` |
-| `request_params` | LLM request parameters (JSON) | `{}` |
-
-#### Conversion Result Table
-
-Switch creates Delta tables with this schema:
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `input_file_number` | int | Unique file identifier |
-| `input_file_path` | string | Source file path |
-| `input_file_token_count_without_sql_comments` | int | Processed token count |
-| `is_conversion_target` | boolean | Whether file should be processed |
-| `result_content` | string | Generated notebook content |
-| `result_total_tokens` | int | LLM tokens consumed |
-| `result_timestamp` | timestamp | Processing completion time |
-| `result_error` | string | Any errors encountered |
-
-**Table Naming**: `{catalog}.{schema}.conversion_targets_{YYYYMMDDHHmm}`
+| Column | Type | Description |
+|--------|------|-------------|
+| `input_file_number` | int | Unique integer identifier for each input file (starts from 1) |
+| `input_file_path` | string | Full path to the input file |
+| `input_file_encoding` | string | Detected encoding of the input file (e.g., UTF-8) |
+| `tokenizer_type` | string | Type of tokenizer used (claude or openai) |
+| `tokenizer_model` | string | Specific tokenizer model/encoding used |
+| `input_file_token_count` | int | Total number of tokens in the input file |
+| `input_file_token_count_without_sql_comments` | int | Token count excluding SQL comments |
+| `input_file_content` | string | Entire content of the input file |
+| `input_file_content_without_sql_comments` | string | Content excluding SQL comments |
+| `is_conversion_target` | boolean | Whether file should be processed (updated during conversion) |
+| `model_serving_endpoint_for_conversion` | string | Model endpoint used for conversion |
+| `model_serving_endpoint_for_fix` | string | Model endpoint used for syntax error fixing |
+| `request_params_for_conversion` | string | Conversion request parameters in JSON format |
+| `request_params_for_fix` | string | Fix request parameters in JSON format |
+| `result_content` | string | Generated notebook content (initially null) |
+| `result_prompt_tokens` | int | Number of prompt tokens used (initially null) |
+| `result_completion_tokens` | int | Number of completion tokens generated (initially null) |
+| `result_total_tokens` | int | Total tokens used (prompt + completion, initially null) |
+| `result_processing_time_seconds` | float | Processing time in seconds (initially null) |
+| `result_timestamp` | timestamp | UTC timestamp when processing completed (initially null) |
+| `result_error` | string | Any conversion errors encountered (initially null) |
+| `result_python_parse_error` | string | Python syntax errors found using ast.parse |
+| `result_extracted_sqls` | array<string> | SQL statements extracted from Python code (initially null) |
+| `result_sql_parse_errors` | array<string> | SQL syntax errors found using EXPLAIN (initially null) |
 
 ### Model Requirements
 
 #### Supported LLM Endpoints
 
+Switch works with LLMs that have large context windows and strong code comprehension capabilities. Databricks Foundation Model APIs provide the simplest setup, while external models offer additional flexibility for organizational requirements.
+
 **Primary Recommendation**:
-- **Claude 3.7 Sonnet** (`databricks-claude-3-7-sonnet`) - Best performance for complex SQL
-- **Extended Thinking Mode**: Enable with `{"max_tokens": 64000, "thinking": {"type": "enabled", "budget_tokens": 16000}}`
+Currently, the latest Claude models available through Foundation Model APIs show the best performance for understanding complex code patterns and business logic in SQL-to-notebook conversion.
 
-**Azure Alternatives**:
-- **Azure OpenAI o1** (2024-12-17) - 200K context, 100K output  
-- **Azure OpenAI o3-mini** (2025-01-31) - 200K context, 100K output
+For complex stored procedures and intricate business logic, Claude's extended thinking mode can significantly improve conversion accuracy. This mode allows the model to reason through complex transformations more thoroughly, though it increases processing time and token usage. To enable extended thinking mode, configure the `request_params` parameter (example values):
+```json
+{"max_tokens": 64000, "thinking": {"type": "enabled", "budget_tokens": 16000}}
+```
 
-**Other Compatible Models**:
-- Claude 3.5 Sonnet, GPT-4o, Llama 3.3 70B Instruct
+Other capable models are also supported through both Foundation Model APIs and external models.
+
+**External Models**:
+For organizations with specific requirements (such as Azure-only policies, custom compliance needs, or high-throughput processing), Switch supports external models through external model serving endpoints. External models offer benefits including:
+- **Throughput Control**: Configure dedicated capacity for consistent performance
+- **Organizational Compliance**: Meet specific cloud or vendor requirements
+- **Cost Management**: Optimize costs for large-scale processing
+- **Higher Concurrency**: Scale beyond Foundation Model API limitations
+
+**Choosing Between Options**:
+- **Foundation Model APIs**: Best for getting started, smaller workloads, and standard use cases
+- **External Models**: Recommended for large-scale processing, organizational constraints, or when higher concurrency is needed
 
 #### Token Management
 
-- **Threshold Logic**: Files exceeding `token_count_threshold` are skipped
-- **Token Counting**: Performed after removing SQL comments and whitespace
-- **Recommended Limits**: 
-  - Normal mode: 20,000 tokens
-  - Extended thinking: 8,000 tokens
+LLMs have limits on how much text they can process at once. Switch uses a simple threshold approach:
 
-### Infrastructure Requirements  
+**How it works:**
+- Stage 1 analyzes each SQL file and counts tokens (after removing comments and compressing multiple spaces into a single space)
+- Files with token count ≤ `token_count_threshold` are marked for conversion
+- Files exceeding the threshold are skipped with status "Not converted"
 
-#### Databricks Permissions
+**Token counting approach:**
+- Claude models: Character-based estimation (~3.4 characters per token)
+- Other models: Uses tiktoken library with o200k_base encoding
+- Rough guideline: 20,000 tokens ≈ 50,000 single-byte characters
 
-Switch requires the following permissions for the executing user:
+**Recommended approach:**
+- Default threshold: 20,000 tokens (example value based on stability testing)
+- For complex transformations with extended thinking: Consider lower thresholds (e.g., 8,000 tokens)
+- Optimal values may vary by model and environment - test in your specific setup for best results
 
-**Workspace Permissions**:
-- **Read/Write Access**: To specified input and output workspace paths
-- **Job Management**: `CAN_MANAGE` or `CAN_VIEW` permissions on created Switch jobs
+**Managing large files:**
+If your SQL files exceed the threshold, consider logical splitting points:
+- Separate stored procedures into individual files
+- Split by functional modules or business domains
+- Maintain referential integrity across split files
 
-**Catalog and Schema Permissions**:
-- **Catalog Access**: `USE CATALOG` permission on the specified catalog (default: `remorph`)
-- **Schema Access**: `USE SCHEMA` permission on the specified schema (default: `transpiler`)
-- **Table Creation**: `CREATE TABLE` permission to create conversion tracking Delta tables
-- **Table Management**: `SELECT`, `INSERT`, `UPDATE` permissions on tracking tables for state management
+#### Performance Optimization
 
-**Model Serving Permissions**:
-- **Endpoint Access**: Permission to query the configured LLM model serving endpoint
-- **Token Usage**: Adequate token quota for your model serving endpoint
+**Concurrency Settings:**
+- **Default concurrency**: Set to 4 to accommodate limitations with some Foundation Model API endpoints
+- **Scaling for large workloads**: For processing many files simultaneously, consider:
+  - **Provisioned Throughput**: Deploy dedicated Foundation Model API capacity with guaranteed throughput
+  - **External Models**: Configure external endpoints with higher rate limits
+  - **Increased concurrency**: Adjust the `concurrency` parameter based on endpoint capacity
 
-**Important**: Both the catalog and schema must **already exist** before running Switch. Switch will not create catalogs or schemas automatically.
-
-#### Compute Resources
-- **Cluster Types**: Serverless or classic compute clusters
-- **Recommended**: Single-node clusters (Photon not required)
-- **Runtime**: DBR 14.3 LTS or 15.3 LTS verified
+**Monitoring:**
+- Watch for rate limiting or throttling responses from model endpoints
+- Consider enabling [Inference Tables](https://docs.databricks.com/aws/en/machine-learning/model-serving/inference-tables) to automatically capture requests and responses for detailed monitoring and debugging
 
 ---
 
@@ -383,21 +415,6 @@ Switch requires the following permissions for the executing user:
 ### Customizable Prompts
 
 Switch supports creating custom conversion prompts for new SQL dialects or specialized conversion requirements.
-
-#### Default YAML Files by Dialect
-
-Switch provides built-in YAML configuration files for each supported SQL dialect:
-
-| SQL Dialect | Source System Example | Default YAML File |
-|-------------|----------------------|-------------------|
-| `mysql` | MySQL / MariaDB / Amazon Aurora MySQL | `mysql_to_databricks_notebook.yml` |
-| `netezza` | IBM Netezza | `netezza_to_databricks_notebook.yml` |
-| `oracle` | Oracle Database / Oracle Exadata | `oracle_to_databricks_notebook.yml` |
-| `postgresql` | PostgreSQL / Amazon Aurora PostgreSQL | `postgresql_to_databricks_notebook.yml` |
-| `redshift` | Amazon Redshift | `redshift_to_databricks_notebook.yml` |
-| `snowflake` | Snowflake | `snowflake_to_databricks_notebook.yml` |
-| `teradata` | Teradata | `teradata_to_databricks_notebook.yml` |
-| `tsql` | Azure Synapse Analytics / Microsoft SQL Server / Azure SQL Database | `tsql_to_databricks_notebook.yml` |
 
 #### Creating Custom Conversion Prompts
 
@@ -466,37 +483,36 @@ few_shots:
 4. **Test thoroughly** with representative SQL files before large-scale usage
 5. **Iterate and refine** based on conversion results
 
-### Multi-Language Comments
-- Generate comments in various languages
-- Preserves original documentation intent
-- Configurable via `--comment-lang`
+#### Reference: Built-in YAML Files
 
-### Experimental SQL Notebooks
-- Optional conversion to SQL notebook format
-- Maintains Spark SQL compatibility
-- Enable with `--sql-output-dir`
+Switch provides built-in YAML configuration files for each of the 8 supported SQL dialects. When creating custom prompts, these built-in configurations serve as excellent starting points - even for supported dialects, customizing the default prompts based on your specific input patterns can significantly improve conversion accuracy.
 
-### Troubleshooting and Best Practices
+**Location**: You can find example YAML files in the `pyscripts/conversion_prompt_yaml/` directory within the same workspace folder as the main Switch notebook (`00_main`). These files demonstrate the proper structure and provide dialect-specific examples that you can adapt for your custom requirements.
 
-#### Re-converting Specific Files
+### Conversion Results and Troubleshooting
 
-If conversion results are not satisfactory, you can re-convert specific files:
+#### Understanding Conversion Results
 
-1. **Mark files for re-conversion**: Use the `11_adjust_conversion_targets` notebook to set the `is_conversion_target` field to `True` for files you want to re-convert
-2. **Re-run conversion**: Execute the `02_convert_sql_to_databricks` notebook and subsequent processes. Only files marked as `is_conversion_target` with `True` will be re-converted
-3. **Add randomness**: To get different results on each run, set the `temperature` in `request_params` to above 0.5 (if supported by your model)
+After your Switch job completes, review the conversion results displayed at the end of the `00_main` notebook execution. The results table shows the status of each input file:
 
-#### Common Issues and Solutions
+- **Successfully converted files**: Ready to use as Databricks notebooks
+- **Files requiring attention**: May need manual review or re-processing
 
-##### Files Not Converting (Status: "Not converted")
+If you encounter files that didn't convert successfully, here are the most common issues and their solutions:
+
+#### Files Not Converting (Status: "Not converted")
+
+These files were skipped during the conversion process, typically because they're too large for the model to process effectively.
 
 **Cause**: Input files exceed the token count threshold
 **Solutions**:
 - Split large input files into smaller, more manageable parts
 - Increase the `token_count_threshold` parameter if your LLM model can handle larger inputs
-- Consider using extended thinking mode for Claude 3.7 Sonnet with reduced threshold (8,000 tokens)
+- For models with extended thinking capabilities, consider using lower thresholds with that mode enabled
 
-##### Conversion with Errors (Status: "Converted with errors")
+#### Conversion with Errors (Status: "Converted with errors")
+
+These files were successfully processed by the LLM but the generated code contains syntax errors that need to be addressed.
 
 **Cause**: Files were converted but contain syntax errors
 **Solutions**:
@@ -505,50 +521,12 @@ If conversion results are not satisfactory, you can re-convert specific files:
 - Increase `max_fix_attempts` for more automatic error correction attempts
 - Verify your model serving endpoint supports the required features
 
-##### Export Failures (Status: "Not exported")
+#### Export Failures (Status: "Not exported")
+
+These files were converted successfully but couldn't be exported as notebooks due to size limitations.
 
 **Cause**: Converted content exceeds 10MB size limit
 **Solutions**:
 - Review and reduce the size of input SQL files
 - Split complex procedures into multiple smaller files
 - Check for excessive code generation or repetitive patterns
-
-#### Token Management Best Practices
-
-##### Understanding Token Counting
-
-- Token count is calculated **after** removing SQL comments and extra whitespace
-- Generated notebooks typically contain more tokens than input SQL due to:
-  - Added comments and documentation
-  - Code formatting and indentation
-  - Python wrapper code around SQL statements
-
-##### Recommended Thresholds by Model
-
-| Model | Recommended `token_count_threshold` | Notes |
-|-------|-----------------------------------|-------|
-| Claude 3.7 Sonnet (Normal) | 20,000 tokens | Default value, tested up to 60,000 tokens |
-| Claude 3.7 Sonnet (Extended Thinking) | 8,000 tokens | Higher values may result in errors |
-| Other models (o1, o3-mini, etc.) | ~20,000 tokens | Test in your environment for optimal values |
-
-##### File Size Management
-
-- For files exceeding token limits, consider logical splitting points:
-  - Separate stored procedures into individual files
-  - Split by functional modules or business domains
-  - Maintain referential integrity across split files
-
-#### Performance Optimization
-
-##### Concurrency Settings
-
-- Default `concurrency` of 4 works well for most use cases
-- Increase concurrency for faster processing (model endpoint permitting)
-- Monitor model serving endpoint for rate limiting or throttling
-
-##### Model Selection Strategy
-
-1. **Start with Claude 3.7 Sonnet** (Foundation Model API) for easiest setup
-2. **Use Extended Thinking Mode** for complex stored procedures and business logic
-3. **Consider Azure alternatives** only if organizational policies require them
-4. **Test token thresholds** in your specific environment before large-scale conversions
