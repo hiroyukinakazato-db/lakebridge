@@ -88,7 +88,7 @@ It is important to note that the transpiler isn't always able to know whether it
 
 ## Plugins overview
 
-Out of the box, Lakebridge comes with two transpilation plugins: Morpheus and BladeBridge. Each one has its own set of capabilities and levels of guarantee that we describe below.
+Out of the box, Lakebridge comes with three transpilation plugins: Morpheus, BladeBridge, and Switch. Each one has its own set of capabilities and levels of guarantee that we describe below.
 
 ### Morpheus
 
@@ -133,15 +133,31 @@ Whether you're migrating a single job or thousands, BladeBridge delivers predict
 
 More details about the BladeBridge converter [here](/docs/transpile/bladebridge_overview)
 
+### Switch
+
+Switch takes a fundamentally different approach to SQL conversion by leveraging Large Language Models (LLMs). Instead of using parsing and rule-based transformation, Switch uses [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) to understand the intent and semantics of SQL code and generate equivalent Databricks notebooks.
+
+Key characteristics of Switch:
+- **LLM-powered conversion** - Uses Databricks Model Serving endpoints to interpret and convert SQL
+- **Notebook-first output** - Generates Databricks notebooks (.py format) containing Python code with embedded Spark SQL
+- **Batch processing** - Executes as Databricks Jobs, processing multiple files in parallel
+- **Extensible through prompts** - You can create custom YAML prompts to support new SQL dialects or specific conversion requirements
+
+Switch's LLM approach is particularly useful for complex stored procedures and ETL logic. While the generated notebooks may require manual adjustments, they provide a valuable starting point for migration.
+
 ### Supported dialects
 
-| Source Platform              | Converter: BladeBridge | Converter: Morpheus | Output: SQL | Output: SparkSql | Output: PySpark | Other features available |
-|:-----------------------------|:-----------:|:--------:|:---:|:--------:|:-------:|:---------------------------:|
-| DataStage                    |  &#x2705;   |          |     | &#x2705; | &#x2705; |                             |
-| Informatica (Cloud, PC)      |  &#x2705;   |          |     | &#x2705; | &#x2705; |                             |
-| Netezza                      |  &#x2705;   |          | &#x2705; |         |         |                             |
-| Oracle (incl. ADS & Exadata) |  &#x2705;   |          | &#x2705; |         |         |                             |
-| Snowflake                    |             | &#x2705; | &#x2705; |         |         | dbt Repointing (Experimental) |
-| SQL Server (incl. Synapse)   |  &#x2705;   | &#x2705; | &#x2705; |         |         |                             |
-| Teradata                     |  &#x2705;   |          | &#x2705; |         |         |                             |
+| Source Platform              | Converter: BladeBridge | Converter: Morpheus | Converter: Switch[^2] | Output: SQL | Output: SparkSql | Output: PySpark | Other features available |
+|:-----------------------------|:-----------:|:--------:|:--------:|:--------:|:--------:|:-------:|:---------------------------:|
+| DataStage                    |  &#x2705;   |          |          |          | &#x2705; | &#x2705; |                             |
+| Informatica (Cloud, PC)      |  &#x2705;   |          |          |          | &#x2705; | &#x2705; |                             |
+| MySQL                        |             |          | &#x2705; | &#x2705; | &#x2705; |         |                             |
+| Netezza                      |  &#x2705;   |          | &#x2705; | &#x2705; | &#x2705; |         |                             |
+| Oracle (incl. ADS & Exadata) |  &#x2705;   |          | &#x2705; | &#x2705; | &#x2705; |         |                             |
+| PostgreSQL                   |             |          | &#x2705; | &#x2705; | &#x2705; |         |                             |
+| Redshift                     |             |          | &#x2705; | &#x2705; | &#x2705; |         |                             |
+| Snowflake                    |             | &#x2705; | &#x2705; | &#x2705; | &#x2705; |         | dbt Repointing (Experimental) |
+| SQL Server (incl. Synapse)   |  &#x2705;   | &#x2705; | &#x2705; | &#x2705; | &#x2705; |         |                             |
+| Teradata                     |  &#x2705;   |          | &#x2705; | &#x2705; | &#x2705; |         |                             |
 
+[^2]: Checkmarks in the Switch column indicate SQL dialects with built-in sample conversion prompts. You can create custom conversion prompts to support additional SQL dialects. For more information, see the [Switch Overview](/docs/transpile/switch_overview).
