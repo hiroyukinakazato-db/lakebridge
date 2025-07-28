@@ -308,7 +308,7 @@ Additional parameters are configured through the Switch config file (see the [Ad
 
 ### State Management
 
-Switch uses a Delta table to track conversion progress and results. Each conversion job creates a timestamped table: `{catalog}.{schema}.conversion_targets_{YYYYMMDDHHmm}`
+Switch uses a Delta table to track conversion progress and results. Each conversion job creates a timestamped table: `{catalog}.{schema}.lakebridge_switch_{YYYYMMDDHHmm}`
 
 The table stores input file information (path, content, token counts), conversion results (generated notebooks, token usage, processing time), error details when conversions fail, and syntax check results from validation stages. This allows you to monitor which files were processed successfully and investigate any issues that occurred during conversion.
 
