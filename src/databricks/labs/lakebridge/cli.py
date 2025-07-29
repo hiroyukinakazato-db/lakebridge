@@ -103,18 +103,22 @@ def _verify_workspace_client(ws: WorkspaceClient) -> WorkspaceClient:
     return ws
 
 
-def _is_switch_available() -> bool:
-    """Check if Switch transpiler is installed and available."""
+def _is_switch_transpiler_request(transpiler_config_path: str | None) -> bool:
+    """
+    Check if this is a Switch transpiler request.
+    
+    Returns True if all conditions are met:
+    1. transpiler_config_path is provided
+    2. config path contains "switch"
+    3. Switch is available in installed transpilers
+    """
     try:
-        available_transpilers = TranspilerInstaller.all_transpiler_names()
-        return "switch" in available_transpilers
-    except Exception:
+        return (transpiler_config_path 
+                and "switch" in transpiler_config_path.lower()
+                and "switch" in TranspilerInstaller.all_transpiler_names())
+    except Exception as e:
+        logger.debug(f"Failed to check Switch transpiler availability: {e}")
         return False
-
-
-def _is_switch_request(transpiler_config_path: str | None) -> bool:
-    """Determine if this is an explicit Switch transpiler request via config path."""
-    return transpiler_config_path and "switch" in transpiler_config_path.lower()
 
 
 def _get_switch_job_id() -> int | None:
@@ -189,26 +193,26 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
             logger.info(f"Switch job completed with run ID: {run.run_id}")
 
             # Format detailed result for synchronous execution
-            return {
+            return [{
                 "transpiler": "switch",
                 "job_id": job_id,
                 "run_id": run.run_id if run.run_id else None,
                 "run_url": f"{ctx.workspace_client.config.host}/jobs/{job_id}/runs/{run.run_id}",
                 "state": run.state.life_cycle_state.value if run.state and run.state.life_cycle_state else "UNKNOWN",
                 "result_state": run.state.result_state.value if run.state and run.state.result_state else None,
-            }
+            }]
         else:
             logger.info(f"Starting Switch job {job_id}...")
             run_id = job_runner.run_async(switch_params)
             logger.info(f"Switch job started with run ID: {run_id}")
             
             # Format result for asynchronous execution
-            return {
+            return [{
                 "transpiler": "switch",
                 "job_id": job_id,
                 "run_id": run_id,
                 "run_url": f"{ctx.workspace_client.config.host}/jobs/{job_id}/runs/{run_id}",
-            }
+            }]
 
     except ImportError as import_error:
         logger.debug(f"Switch import failed: {import_error}")
@@ -237,6 +241,24 @@ def transpile(
     ctx = ApplicationContext(w)
     logger.debug(f"Preconfigured transpiler config: {ctx.transpile_config!r}")
     with_user_agent_extra("cmd", "execute-transpile")
+
+    # Early Switch detection to bypass local path validation
+    # Switch uses workspace paths which would fail in checker.use_input_source()
+    if _is_switch_transpiler_request(transpiler_config_path):
+        logger.info("Switch transpiler detected - using Jobs API execution")
+        config = TranspileConfig(
+            transpiler_config_path=transpiler_config_path,
+            source_dialect=source_dialect,
+            input_source=input_source,
+            output_folder=output_folder,
+            catalog_name=catalog_name,
+            schema_name=schema_name,
+        )
+        result = _execute_switch_directly(ctx, config)
+        logger.info(f"Switch result: {json.dumps(result)}")
+        print(json.dumps(result))
+        return
+
     checker = _TranspileConfigChecker(ctx.transpile_config, ctx.prompts)
     checker.use_transpiler_config_path(transpiler_config_path)
     checker.use_source_dialect(source_dialect)
@@ -248,13 +270,6 @@ def transpile(
     checker.use_schema_name(schema_name)
     config, engine = checker.check()
     logger.debug(f"Final configuration for transpilation: {config!r}")
-
-    # Check if this is a Switch transpiler request
-    if (_is_switch_available() and _is_switch_request(config.transpiler_config_path)):
-        logger.info("Switch transpiler detected - using Jobs API execution")
-        result = _execute_switch_directly(ctx, config)
-        print(json.dumps(result))
-        return
 
     assert config.source_dialect is not None, "Source dialect has been validated by this point."
     with_user_agent_extra("transpiler_source_tech", make_alphanum_or_semver(config.source_dialect))
