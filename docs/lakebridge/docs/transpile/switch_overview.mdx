@@ -416,7 +416,7 @@ If your SQL files exceed the threshold, consider logical splitting points:
 
 ## Customizable Prompts
 
-Switch supports creating custom conversion prompts for new SQL dialects or specialized conversion requirements.
+You can create custom conversion prompts for Switch to handle new SQL dialects or specialized conversion requirements.
 
 ### Creating Custom Conversion Prompts
 
@@ -469,7 +469,7 @@ few_shots:
 - Clear explanation of the conversion purpose
 - Definition of input and output formats
 - Additional instructions for specific conversions
-- Comment language specification (`{comment_lang}` is automatically replaced)
+- Comment language specification (`{comment_lang}` will be replaced automatically by Switch)
 - Reference to common instructions (`${common_python_instructions_and_guidelines}`)
 
 **`few_shots` Section** (Optional but recommended):
@@ -479,7 +479,7 @@ few_shots:
 
 ### Best Practices for Custom Prompts
 
-1. **Start with existing YAML files** as templates for your custom dialects
+1. **Start with the built-in YAML files** as templates for your custom dialects
 2. **Include specific dialect features** that differ from standard SQL
 3. **Provide comprehensive examples** covering edge cases in your SQL dialect
 4. **Test thoroughly** with representative SQL files before large-scale usage
@@ -487,7 +487,7 @@ few_shots:
 
 ### Reference: Built-in YAML Files
 
-Switch provides built-in YAML configuration files for each of the 8 supported SQL dialects. When creating custom prompts, these built-in configurations serve as excellent starting points - even for supported dialects, customizing the default prompts based on your specific input patterns can significantly improve conversion accuracy.
+Switch includes built-in YAML configuration files for each supported SQL dialect. When creating custom prompts, these built-in configurations serve as excellent starting points - even for supported dialects, customizing the default prompts based on your specific input patterns can significantly improve conversion accuracy.
 
 **Location**: You can find example YAML files in the `pyscripts/conversion_prompt_yaml/` directory within the same workspace folder as the main Switch notebook (`00_main`). These files demonstrate the proper structure and provide dialect-specific examples that you can adapt for your custom requirements.
 
@@ -527,7 +527,6 @@ These files were skipped during the conversion process, typically because they'r
 **Solutions**:
 - Split large input files into smaller, more manageable parts
 - Increase the `token_count_threshold` parameter if your LLM model can handle larger inputs
-- For models with extended thinking capabilities, consider using lower thresholds with that mode enabled
 
 ### Conversion with Errors (Status: "Converted with errors")
 
@@ -539,15 +538,14 @@ These files were successfully processed by the LLM but the generated code contai
 - Review syntax error messages at the bottom of output notebooks
 - Manually fix errors in the converted notebooks
 - Increase `max_fix_attempts` for more automatic error correction attempts
-- Verify your model serving endpoint supports the required features
 
 ### Export Failures (Status: "Not exported")
 
-These files were converted successfully but couldn't be exported as notebooks due to size limitations.
+These files were converted successfully but couldn't be exported as notebooks due to size limitations. This is a rare occurrence that typically only happens with exceptionally large or complex SQL files.
 
 **Cause**: Converted content exceeds 10MB size limit
 
 **Solutions**:
-- Review and reduce the size of input SQL files
-- Split complex procedures into multiple smaller files
-- Check for excessive code generation or repetitive patterns
+- Check the result table for excessive code generation or repetitive patterns in the LLM output
+- Manually split the converted content into multiple notebooks
+- Consider splitting the original SQL file into smaller logical units and re-running the conversion
