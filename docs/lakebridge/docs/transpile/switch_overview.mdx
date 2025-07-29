@@ -24,13 +24,13 @@ Instead of parsing rules, Switch uses [Mosaic AI Model Serving](https://docs.dat
 ### Native Databricks Integration
 Switch runs entirely within the Databricks platform:
 - **Jobs API**: Executes as scalable Databricks Jobs for batch processing
-- **Delta Tables**: Tracks conversion progress with restart capabilities  
+- **Delta Tables**: Tracks conversion progress and results
 - **Model Serving**: Direct integration with Databricks LLM endpoints
-- **Parallel Processing**: Leverages cluster resources for multiple files
+- **Parallel Processing**: Concurrent model serving endpoint calls for multiple files
 
 ### Flexible Output Formats
 - **Primary Output**: Python notebooks containing Spark SQL
-- **Experimental**: SQL notebook conversion for pure SQL workflows
+- **Experimental**: Additional SQL notebook output converted from generated Python notebooks
 
 ---
 
@@ -57,11 +57,12 @@ Before installing and using Switch, ensure your Databricks environment meets the
 
 ### Model Serving Access
 
-**LLM Endpoint Requirements**
-- **Foundation Model API**: Default endpoint is `databricks-claude-sonnet-4`
-- **Custom Endpoints**: You can configure custom or external model serving endpoints
-- **Token Quota**: Sufficient quota for your conversion workload
-- **Permissions**: Query access to the configured model serving endpoint
+Switch uses Foundation Model APIs (like Claude) by default, with options for external model endpoints:
+
+- **Default Setup**: Uses Foundation Model API endpoints - no additional configuration required
+- **Permissions Required**: Query access to the model serving endpoint being used
+- **Token Quota**: Ensure sufficient quota is available for your conversion workload
+- **Custom Options**: Optionally configure external model endpoints or Provisioned Throughput for higher capacity
 
 ### Databricks Runtime (for Classic Job Compute)
 - **Default**: Serverless job compute (no runtime configuration required)
@@ -73,7 +74,7 @@ Before installing and using Switch, ensure your Databricks environment meets the
 
 ## SQL Dialect Support
 
-Switch provides built-in sample conversion prompts for 8 major SQL dialects, with extensibility for custom dialects through YAML configuration.
+Switch provides built-in sample conversion prompts for major SQL dialects, with extensibility for custom dialects through YAML configuration.
 
 ### Built-in Sample Conversion Prompts
 
@@ -143,6 +144,8 @@ When executing the above command, the response will look like this:
 }
 ```
 
+Use the returned `run_url` to monitor the conversion progress and view detailed results in your Databricks workspace.
+
 For advanced configuration options, see the [Advanced Configuration](#advanced-configuration) section below.
 
 #### Operational Notes
@@ -160,9 +163,10 @@ Switch operates differently from other Lakebridge transpilers:
 - `--transpiler-config-path` - Local path to Switch configuration file (identifies Switch as the transpiler)
 - `--input-source` - Databricks workspace path(s) containing SQL files to convert (see Input Source Patterns below)
 - `--output-folder` - Databricks workspace path for generated notebooks
-- `--source-dialect` - SQL dialect: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql`
-- `--catalog-name` - Databricks catalog for state tables (default: `remorph`). Must already exist.
-- `--schema-name` - Databricks schema for state tables (default: `transpiler`). Must already exist.
+- `--source-dialect` - SQL dialect. Choose from: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql`
+- `--catalog-name` - Databricks catalog for state tables. Must already exist.
+- `--schema-name` - Databricks schema for state tables. Must already exist.
+  - Note: The user must have `CREATE TABLE` permissions on the specified catalog and schema for Switch's state management and intermediate result tables.
 
 #### Input Source Patterns
 
@@ -174,10 +178,6 @@ The `--input-source` parameter supports flexible path specifications:
 | **Multiple Directories** | `/Workspace/project1/sql,/Workspace/project2/sql` | Process files from multiple directories recursively (comma-separated) |
 | **Glob Patterns** | `/Workspace/Users/*/sql/*.sql` | Use wildcards to match paths (`*` = any characters, `**` = recursive) |
 | **Mixed Patterns** | `/Workspace/prod/**/*.sql,/Workspace/dev/sql` | Combine different pattern types |
-
-#### Permission Requirements
-
-The user must have `CREATE TABLE` permissions on the specified catalog and schema for Switch's state management and intermediate result tables.
 
 #### Advanced Configuration
 
@@ -191,7 +191,7 @@ Switch provides detailed configuration options that can be set during installati
 | `comment_lang` | Language for generated comments | `English` | `English`, `Japanese`, `Chinese`, `Spanish`, `French`, `German` |
 | `max_fix_attempts` | Maximum syntax error fix attempts | `1` | Any positive integer |
 | `log_level` | Logging verbosity level | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `conversion_prompt_yaml` | Custom conversion prompt YAML file path | `<none>` | Full workspace path to YAML file |
+| `conversion_prompt_yaml` | Custom conversion prompt YAML file path. When specified, this custom prompt is used instead of the built-in prompt for the selected `--source-dialect` | `<none>` | Full workspace path to YAML file |
 | `existing_result_table` | Existing result table to reuse | `<none>` | Full table name (`catalog.schema.table`) |
 | `sql_output_dir` | (Experimental) Directory for SQL notebooks | `<none>` | Full workspace path |
 | `wait_for_completion` | Wait for job completion. `true`=waits until job finishes, `false`=returns immediately with job URL | `false` | `true`, `false` |
@@ -215,7 +215,7 @@ Switch's LLM-based approach makes it particularly suitable for:
 Morpheus and BladeBridge are particularly suitable for:
 - **Interactive conversion** with immediate processing
 - **Deterministic output requirements** with guaranteed syntax equivalence
-- **High-volume processing** with faster throughput than Switch
+- **High-volume processing** with faster processing (no LLM API calls required)
 
 Choose the approach based on your project's complexity, accuracy requirements, and processing time constraints.
 
@@ -242,7 +242,7 @@ The **`00_main`** notebook serves as the entry point when Switch is executed via
 - Validates all input parameters from the job configuration
 - Executes each processing stage in sequence using `dbutils.notebook.run()`
 - Tracks overall progress and handles stage-level failures
-- Returns the final conversion status to the job runner
+- Displays final conversion results and status in the job output
 
 #### Conversion Flow
 
@@ -494,6 +494,22 @@ few_shots:
 Switch provides built-in YAML configuration files for each of the 8 supported SQL dialects. When creating custom prompts, these built-in configurations serve as excellent starting points - even for supported dialects, customizing the default prompts based on your specific input patterns can significantly improve conversion accuracy.
 
 **Location**: You can find example YAML files in the `pyscripts/conversion_prompt_yaml/` directory within the same workspace folder as the main Switch notebook (`00_main`). These files demonstrate the proper structure and provide dialect-specific examples that you can adapt for your custom requirements.
+
+#### FAQ: Can Switch Support My Source System?
+
+A common question is whether Switch can handle sources beyond the built-in SQL dialects. The answer is: **try it!**
+
+**For SQL-based sources**: Creating a custom prompt YAML file should work well for most SQL dialects. Since LLMs understand SQL syntax patterns, you can typically achieve good results by:
+- Starting with a similar built-in dialect's YAML as a template
+- Adding specific syntax examples from your source system
+- Testing and iterating based on results
+
+**For non-SQL sources**: Switch's LLM-based architecture means it can potentially handle other code-to-notebook conversions (e.g., converting Python scripts, R code, or other programming languages to Databricks notebooks). Modern LLMs have strong code comprehension capabilities across many programming languages. While these use cases haven't been extensively tested, you can experiment by:
+- Creating custom prompts that define your source format
+- Providing clear conversion examples in the few-shots section
+- Testing with representative code samples
+
+Rather than waiting for additional built-in examples, we encourage experimentation with custom prompts. The flexibility of LLM-based conversion means many use cases are possible with the right prompt engineering.
 
 ### Conversion Results and Troubleshooting
 
