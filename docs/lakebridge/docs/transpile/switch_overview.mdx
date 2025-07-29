@@ -177,7 +177,7 @@ The `--input-source` parameter supports flexible path specifications:
 | **Glob Patterns** | `/Workspace/Users/*/sql/*.sql` | Use wildcards to match paths (`*` = any characters, `**` = recursive) |
 | **Mixed Patterns** | `/Workspace/prod/**/*.sql,/Workspace/dev/sql` | Combine different pattern types |
 
-#### Advanced Configuration
+### Advanced Configuration
 
 Switch provides detailed configuration options that can be set during installation or by editing the `config.yml` file directly:
 
@@ -414,13 +414,11 @@ If your SQL files exceed the threshold, consider logical splitting points:
 
 ---
 
-## Advanced Usage
-
-### Customizable Prompts
+## Customizable Prompts
 
 Switch supports creating custom conversion prompts for new SQL dialects or specialized conversion requirements.
 
-#### Creating Custom Conversion Prompts
+### Creating Custom Conversion Prompts
 
 To create a custom conversion prompt:
 
@@ -430,7 +428,7 @@ To create a custom conversion prompt:
 
 Custom conversion prompts require two main sections:
 
-##### Required Structure
+#### Required Structure
 
 ```yaml
 system_message: |
@@ -465,7 +463,7 @@ few_shots:
     display(active_users)
 ```
 
-##### Key Elements
+#### Key Elements
 
 **`system_message` Section**:
 - Clear explanation of the conversion purpose
@@ -479,7 +477,7 @@ few_shots:
 - Each example demonstrates specific patterns for LLM understanding
 - Shows typical conversion patterns for your SQL dialect
 
-#### Best Practices for Custom Prompts
+### Best Practices for Custom Prompts
 
 1. **Start with existing YAML files** as templates for your custom dialects
 2. **Include specific dialect features** that differ from standard SQL
@@ -487,13 +485,13 @@ few_shots:
 4. **Test thoroughly** with representative SQL files before large-scale usage
 5. **Iterate and refine** based on conversion results
 
-#### Reference: Built-in YAML Files
+### Reference: Built-in YAML Files
 
 Switch provides built-in YAML configuration files for each of the 8 supported SQL dialects. When creating custom prompts, these built-in configurations serve as excellent starting points - even for supported dialects, customizing the default prompts based on your specific input patterns can significantly improve conversion accuracy.
 
 **Location**: You can find example YAML files in the `pyscripts/conversion_prompt_yaml/` directory within the same workspace folder as the main Switch notebook (`00_main`). These files demonstrate the proper structure and provide dialect-specific examples that you can adapt for your custom requirements.
 
-#### FAQ: Can Switch Support My Source System?
+### FAQ: Can Switch Support My Source System?
 
 A common question is whether Switch can handle sources beyond the built-in SQL dialects. The answer is: **try it!**
 
@@ -509,9 +507,9 @@ A common question is whether Switch can handle sources beyond the built-in SQL d
 
 Rather than waiting for additional built-in examples, we encourage experimentation with custom prompts. The flexibility of LLM-based conversion means many use cases are possible with the right prompt engineering.
 
-### Conversion Results and Troubleshooting
+## Conversion Results and Troubleshooting
 
-#### Understanding Conversion Results
+### Understanding Conversion Results
 
 After your Switch job completes, review the conversion results displayed at the end of the `00_main` notebook execution. The results table shows the status of each input file:
 
@@ -520,7 +518,7 @@ After your Switch job completes, review the conversion results displayed at the 
 
 If you encounter files that didn't convert successfully, here are the most common issues and their solutions:
 
-#### Files Not Converting (Status: "Not converted")
+### Files Not Converting (Status: "Not converted")
 
 These files were skipped during the conversion process, typically because they're too large for the model to process effectively.
 
@@ -531,7 +529,7 @@ These files were skipped during the conversion process, typically because they'r
 - Increase the `token_count_threshold` parameter if your LLM model can handle larger inputs
 - For models with extended thinking capabilities, consider using lower thresholds with that mode enabled
 
-#### Conversion with Errors (Status: "Converted with errors")
+### Conversion with Errors (Status: "Converted with errors")
 
 These files were successfully processed by the LLM but the generated code contains syntax errors that need to be addressed.
 
@@ -543,7 +541,7 @@ These files were successfully processed by the LLM but the generated code contai
 - Increase `max_fix_attempts` for more automatic error correction attempts
 - Verify your model serving endpoint supports the required features
 
-#### Export Failures (Status: "Not exported")
+### Export Failures (Status: "Not exported")
 
 These files were converted successfully but couldn't be exported as notebooks due to size limitations.
 
