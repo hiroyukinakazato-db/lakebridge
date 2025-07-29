@@ -118,7 +118,7 @@ Configuration is saved to:
 
 ### CLI Usage
 
-Use the following command to run Switch. Specifying the Switch config file with `--transpiler-config-path` tells Lakebridge to use Switch as the transpiler:
+Use the following command to run Switch. Specifying the Switch config file with `--transpiler-config-path` tells Lakebridge to use Switch as the transpiler. Add `--output json` for structured output with job monitoring details:
 
 ```bash
 # Switch usage
@@ -128,7 +128,19 @@ databricks labs lakebridge transpile \
   --output-folder /Workspace/path/to/notebooks \
   --source-dialect snowflake \
   --catalog-name your_existing_catalog \
-  --schema-name your_existing_schema
+  --schema-name your_existing_schema \
+  --output json
+```
+
+When executing the above command, the response will look like this:
+
+```json
+{
+  "transpiler": "switch",
+  "job_id": 12345,
+  "run_id": 67890,
+  "run_url": "https://your-workspace.databricks.com/#job/12345/run/67890"
+}
 ```
 
 For advanced configuration options, see the [Advanced Configuration](#advanced-configuration) section below.
@@ -145,9 +157,9 @@ Switch operates differently from other Lakebridge transpilers:
 ### CLI Parameters
 
 #### Required Parameters
-- `--transpiler-config-path` - Path to Switch configuration file (identifies Switch as the transpiler)
-- `--input-source` - Path(s) containing SQL files to convert (see Input Source Patterns below)
-- `--output-folder` - Workspace path for generated notebooks
+- `--transpiler-config-path` - Local path to Switch configuration file (identifies Switch as the transpiler)
+- `--input-source` - Databricks workspace path(s) containing SQL files to convert (see Input Source Patterns below)
+- `--output-folder` - Databricks workspace path for generated notebooks
 - `--source-dialect` - SQL dialect: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql`
 - `--catalog-name` - Databricks catalog for state tables (default: `remorph`). Must already exist.
 - `--schema-name` - Databricks schema for state tables (default: `transpiler`). Must already exist.
@@ -182,41 +194,11 @@ Switch provides detailed configuration options that can be set during installati
 | `conversion_prompt_yaml` | Custom conversion prompt YAML file path | `<none>` | Full workspace path to YAML file |
 | `existing_result_table` | Existing result table to reuse | `<none>` | Full table name (`catalog.schema.table`) |
 | `sql_output_dir` | (Experimental) Directory for SQL notebooks | `<none>` | Full workspace path |
-| `wait_for_completion` | Wait for job completion (synchronous mode) | `false` | `true`, `false` |
+| `wait_for_completion` | Wait for job completion. `true`=waits until job finishes, `false`=returns immediately with job URL | `false` | `true`, `false` |
 
 **Configuration Methods**:
 1. **During Installation**: Configure options when running `databricks labs lakebridge install-transpile`
 2. **Direct File Edit**: Modify the `config.yml` file at the installation path and then execute `databricks labs lakebridge transpile`
-
-### Job Monitoring
-
-After executing the transpile command, Switch runs **asynchronously by default** and returns job execution details. Use `--output json` for structured output:
-
-```bash
-databricks labs lakebridge transpile \
-  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
-  --input-source /Workspace/path/to/sql \
-  --output-folder /Workspace/path/to/notebooks \
-  --source-dialect snowflake \
-  --catalog-name your_existing_catalog \
-  --schema-name your_existing_schema \
-  --output json
-```
-
-```json
-{
-  "transpiler": "switch",
-  "job_id": 12345,
-  "run_id": 67890,
-  "run_url": "https://your-workspace.databricks.com/#job/12345/run/67890"
-}
-```
-
-Access the `run_url` to monitor job progress in your Databricks workspace. Without `--output json`, results are displayed in table format.
-
-**Job Execution Modes**:
-- **Asynchronous (default)**: Command returns immediately with monitoring URL
-- **Synchronous**: Set `wait_for_completion: true` in transpiler config to wait for job completion
 
 ---
 
