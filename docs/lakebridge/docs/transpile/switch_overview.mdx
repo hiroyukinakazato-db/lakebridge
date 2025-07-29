@@ -190,7 +190,18 @@ Switch provides detailed configuration options that can be set during installati
 
 ### Job Monitoring
 
-After executing the transpile command, Switch runs **asynchronously by default** and returns job execution details in JSON format:
+After executing the transpile command, Switch runs **asynchronously by default** and returns job execution details. Use `--output json` for structured output:
+
+```bash
+databricks labs lakebridge transpile \
+  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
+  --input-source /Workspace/path/to/sql \
+  --output-folder /Workspace/path/to/notebooks \
+  --source-dialect snowflake \
+  --catalog-name your_existing_catalog \
+  --schema-name your_existing_schema \
+  --output json
+```
 
 ```json
 {
@@ -201,7 +212,7 @@ After executing the transpile command, Switch runs **asynchronously by default**
 }
 ```
 
-Access the `run_url` to monitor job progress in your Databricks workspace.
+Access the `run_url` to monitor job progress in your Databricks workspace. Without `--output json`, results are displayed in table format.
 
 **Job Execution Modes**:
 - **Asynchronous (default)**: Command returns immediately with monitoring URL

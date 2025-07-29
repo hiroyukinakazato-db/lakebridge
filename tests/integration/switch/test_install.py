@@ -126,7 +126,7 @@ class TestSwitchInstallationProcess:
 
             # Copy actual config.yml from installed TestPyPI package
             package_path = testpypi_install["package_path"]
-            source_config = package_path / "lsp" / "config.yml"
+            source_config = package_path.parent / "lsp" / "config.yml"
             target_config = switch_dir / "config.yml"
 
             if source_config.exists():
@@ -192,7 +192,7 @@ class TestSwitchInstallationProcess:
 
             # Copy actual config.yml from TestPyPI package
             package_path = testpypi_install["package_path"]
-            source_config = package_path / "lsp" / "config.yml"
+            source_config = package_path.parent / "lsp" / "config.yml"
             if source_config.exists():
                 import shutil
                 shutil.copy(source_config, config_path)
@@ -241,7 +241,7 @@ class TestSwitchInstallationProcess:
 
             # Write initial config from actual TestPyPI package
             package_path = testpypi_install["package_path"]
-            source_config = package_path / "lsp" / "config.yml"
+            source_config = package_path.parent / "lsp" / "config.yml"
             if source_config.exists():
                 import shutil
                 shutil.copy(source_config, config_path)

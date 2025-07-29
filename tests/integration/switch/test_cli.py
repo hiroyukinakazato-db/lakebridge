@@ -107,8 +107,8 @@ class TestSwitchCLIIntegration:
     def test_switch_detection(self, switch_config_path):
         """Test that Switch is properly detected when installed"""
         # When Switch config exists, it should be detected
-        is_available = cli._is_switch_available()
-        assert is_available is True, "Switch should be detected when config exists"
+        is_switch_request = cli._is_switch_transpiler_request(str(switch_config_path))
+        assert is_switch_request is True, "Switch should be detected when config exists"
         
         # Verify Switch appears in available transpilers
         all_transpilers = TranspilerInstaller.all_transpiler_names()
@@ -125,8 +125,7 @@ class TestSwitchCLIIntegration:
         )
         
         # Should route to Switch when available and requested
-        assert cli._is_switch_available() is True
-        assert cli._is_switch_request(switch_config.transpiler_config_path) is True
+        assert cli._is_switch_transpiler_request(switch_config.transpiler_config_path) is True
         
         # Test with non-Switch transpiler
         non_switch_config = TranspileConfig(
@@ -136,7 +135,7 @@ class TestSwitchCLIIntegration:
             output_folder="/test/output"
         )
         
-        assert cli._is_switch_request(non_switch_config.transpiler_config_path) is False
+        assert cli._is_switch_transpiler_request(non_switch_config.transpiler_config_path) is False
 
     def test_switch_parameter_mapping(self, mock_application_context, valid_transpile_config, switch_config_path):
         """Test conversion from TranspileConfig to SwitchJobParameters"""
@@ -179,12 +178,14 @@ class TestSwitchCLIIntegration:
                 # Execute Switch directly
                 result = cli._execute_switch_directly(mock_application_context, valid_transpile_config)
                 
-                # Verify result structure
-                assert isinstance(result, dict)
-                assert result["transpiler"] == "switch"
-                assert result["job_id"] == 12345  # From config
-                assert result["run_id"] == 987654321
-                assert "run_url" in result
+                # Verify result structure (returns list with single dict)
+                assert isinstance(result, list)
+                assert len(result) == 1
+                result_item = result[0]
+                assert result_item["transpiler"] == "switch"
+                assert result_item["job_id"] == 12345  # From config
+                assert result_item["run_id"] == 987654321
+                assert "run_url" in result_item
                 
                 # Verify job runner was called correctly
                 mock_job_runner_class.assert_called_once_with(
@@ -226,14 +227,16 @@ class TestSwitchCLIIntegration:
                 # Execute Switch with wait option
                 result = cli._execute_switch_directly(mock_application_context, config_with_wait)
 
-                # Verify synchronous execution results
-                assert isinstance(result, dict)
-                assert result["transpiler"] == "switch"
-                assert result["job_id"] == 12345
-                assert result["run_id"] == 987654321
-                assert result["state"] == "TERMINATED"
-                assert result["result_state"] == "SUCCESS"
-                assert "run_url" in result
+                # Verify synchronous execution results (returns list with single dict)
+                assert isinstance(result, list)
+                assert len(result) == 1
+                result_item = result[0]
+                assert result_item["transpiler"] == "switch"
+                assert result_item["job_id"] == 12345
+                assert result_item["run_id"] == 987654321
+                assert result_item["state"] == "TERMINATED"
+                assert result_item["result_state"] == "SUCCESS"
+                assert "run_url" in result_item
 
                 # Verify run_sync was called instead of run_async
                 mock_job_runner.run_sync.assert_called_once_with(mock_params)

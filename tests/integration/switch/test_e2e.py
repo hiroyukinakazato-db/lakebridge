@@ -200,12 +200,15 @@ class TestSwitchE2E:
                 "wait_for_completion": False
             })
 
-            # Verify async execution result
-            assert result["transpiler"] == "switch"
-            assert result["job_id"] == job_id
-            assert "run_id" in result
-            assert "run_url" in result
-            logger.info(f"Async transpilation started with run ID: {result['run_id']}")
+            # Verify async execution result (returns list with single dict)
+            assert isinstance(result, list)
+            assert len(result) == 1
+            result_item = result[0]
+            assert result_item["transpiler"] == "switch"
+            assert result_item["job_id"] == job_id
+            assert "run_id" in result_item
+            assert "run_url" in result_item
+            logger.info(f"Async transpilation started with run ID: {result_item['run_id']}")
 
         finally:
             self._cleanup_test_workspace(workspace_client, input_dir)
@@ -252,18 +255,21 @@ class TestSwitchE2E:
             elapsed_time = time.time() - start_time
             logger.info(f"Sync transpilation completed in {elapsed_time:.1f} seconds")
 
-            # Verify sync execution result
-            assert result["transpiler"] == "switch"
-            assert result["job_id"] == job_id
-            assert "state" in result
-            assert "result_state" in result
-            assert result["state"] in ["TERMINATED", "SKIPPED"]
+            # Verify sync execution result (returns list with single dict)
+            assert isinstance(result, list)
+            assert len(result) == 1
+            result_item = result[0]
+            assert result_item["transpiler"] == "switch"
+            assert result_item["job_id"] == job_id
+            assert "state" in result_item
+            assert "result_state" in result_item
+            assert result_item["state"] in ["TERMINATED", "SKIPPED"]
 
             # Check output was created
             output_items = workspace_client.workspace.list(output_dir)
             output_count = sum(1 for _ in output_items)
             assert output_count > 0, "No output files created"
-            logger.info(f"Sync transpilation successful with state: {result['state']}")
+            logger.info(f"Sync transpilation successful with state: {result_item['state']}")
 
         finally:
             self._cleanup_test_workspace(workspace_client, input_dir)
@@ -342,7 +348,7 @@ class TestSwitchE2E:
         import shutil
 
         switch_package_dir = Path(switch.__file__).parent
-        source_config = switch_package_dir / "lsp" / "config.yml"
+        source_config = switch_package_dir.parent / "lsp" / "config.yml"
 
         transpilers_path = Path.home() / ".databricks" / "labs" / "remorph-transpilers"
         switch_path = transpilers_path / "switch" / "lib"

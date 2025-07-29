@@ -574,7 +574,6 @@ class WorkspaceInstaller:
 
             # Step 4: Update config.yml with job information
             self._update_switch_config(install_result)
-            logger.info(f"Switch deployed successfully. Job ID: {install_result.job_id}")
 
             # Step 5: Display installation details to user
             self._display_switch_installation_details(install_result)
@@ -654,17 +653,16 @@ class WorkspaceInstaller:
         """Display Switch installation details to user"""
         config_path = TranspilerInstaller.transpiler_config_path("switch")
         lines = [
-            "",
             "Switch deployed successfully!",
             f"Job Name: {install_result.job_name}",
             f"Job ID: {install_result.job_id}",
             f"Job URL: {install_result.job_url}",
             f"Created by: {install_result.created_by}",
             f"Switch home: {install_result.switch_home}",
-            f"Transpiler config: {config_path}",
-            ""
+            f"Transpiler config: {config_path}"
         ]
-        print("\n".join(lines))
+        for line in lines:
+            logger.info(line)
 
     @classmethod
     def is_java_version_okay(cls) -> bool:
@@ -686,18 +684,17 @@ class WorkspaceInstaller:
             case _:
                 return True
 
-    @classmethod
-    def install_artifact(cls, artifact: str):
+    def install_artifact(self, artifact: str):
         path = Path(artifact)
         if not path.exists():
             logger.error(f"Could not locate artifact {artifact}")
             return
         if "databricks-morph-plugin" in path.name:
-            cls.install_morpheus(path)
+            self.install_morpheus(path)
         elif "databricks_bb_plugin" in path.name:
-            cls.install_bladebridge(path)
-        elif "databricks-switch-plugin" in path.name:
-            cls.install_switch(path)
+            self.install_bladebridge(path)
+        elif "databricks_switch_plugin" in path.name:
+            self.install_switch(path)
         else:
             logger.fatal(f"Cannot install unsupported artifact: {artifact}")
 
