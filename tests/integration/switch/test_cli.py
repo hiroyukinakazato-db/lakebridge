@@ -25,7 +25,6 @@ Test coverage:
     Mocks: switch.api.job_runner.SwitchJobRunner, _get_switch_job_id
 """
 import logging
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -35,7 +34,6 @@ import yaml
 
 from databricks.labs.lakebridge import cli
 from databricks.labs.lakebridge.config import TranspileConfig
-from databricks.labs.lakebridge.contexts.application import ApplicationContext
 from databricks.labs.lakebridge.install import TranspilerInstaller
 
 
@@ -61,6 +59,20 @@ def switch_config_path():
                 "dialects": ["mysql", "netezza", "oracle", "postgresql", 
                            "redshift", "snowflake", "teradata", "tsql"],
                 "command_line": ["echo", "Switch uses Jobs API, not LSP"]
+            },
+            "options": {
+                "all": [
+                    {"flag": "endpoint_name", "method": "QUESTION", "prompt": "Model endpoint name", "default": "databricks-claude-sonnet-4"},
+                    {"flag": "token_count_threshold", "method": "QUESTION", "prompt": "Token count threshold", "default": 20000},
+                    {"flag": "concurrency", "method": "QUESTION", "prompt": "Concurrency level", "default": 4},
+                    {"flag": "comment_lang", "method": "CHOICE", "prompt": "Comment language", "choices": ["English", "Japanese", "Chinese", "Spanish", "French", "German"], "default": "English"},
+                    {"flag": "max_fix_attempts", "method": "QUESTION", "prompt": "Maximum fix attempts", "default": 1},
+                    {"flag": "log_level", "method": "CHOICE", "prompt": "Log level", "choices": ["DEBUG", "INFO", "WARNING", "ERROR"], "default": "INFO"},
+                    {"flag": "conversion_prompt_yaml", "method": "QUESTION", "prompt": "Custom conversion prompt YAML file path", "default": "<none>"},
+                    {"flag": "existing_result_table", "method": "QUESTION", "prompt": "Existing result table name", "default": "<none>"},
+                    {"flag": "sql_output_dir", "method": "QUESTION", "prompt": "SQL output directory", "default": "<none>"},
+                    {"flag": "wait_for_completion", "method": "CHOICE", "prompt": "Wait for job completion?", "choices": ["true", "false"], "default": "false"}
+                ]
             },
             "custom": {
                 "execution_type": "jobs_api",
@@ -138,26 +150,29 @@ class TestSwitchCLIIntegration:
         assert cli._is_switch_transpiler_request(non_switch_config.transpiler_config_path) is False
 
     def test_switch_parameter_mapping(self, mock_application_context, valid_transpile_config, switch_config_path):
-        """Test conversion from TranspileConfig to SwitchJobParameters"""
+        """Test conversion from TranspileConfig to SwitchJobParameters using new implementation"""
         try:
-            # Import here to skip if not available
-            from switch.api.job_parameters import SwitchJobParameters
+            # Test the new _create_switch_job_parameters function
+            params, wait_for_completion, job_id = cli._create_switch_job_parameters(valid_transpile_config)
             
-            # Create parameters from config
-            params = SwitchJobParameters(
-                input_dir=valid_transpile_config.input_source,
-                output_dir=valid_transpile_config.output_folder,
-                result_catalog=valid_transpile_config.catalog_name,
-                result_schema=valid_transpile_config.schema_name,
-                sql_dialect=valid_transpile_config.source_dialect,
-            )
-            
-            # Verify mapping
+            # Verify mapping from TranspileConfig
             assert params.input_dir == "/Workspace/Users/test/sql_input"
             assert params.output_dir == "/Workspace/Users/test/notebooks_output"
             assert params.result_catalog == "test_catalog"
             assert params.result_schema == "test_schema"
             assert params.sql_dialect == "snowflake"
+            
+            # Verify parameters from Switch config defaults
+            assert params.endpoint_name == "databricks-claude-sonnet-4"
+            assert params.token_count_threshold == 20000
+            assert params.concurrency == 4
+            assert params.comment_lang == "English"
+            assert params.max_fix_attempts == 1
+            assert params.log_level == "INFO"
+            
+            # Verify wait_for_completion and job_id extraction
+            assert wait_for_completion == False  # Default from config
+            assert job_id == 12345  # From config fixture
             
         except ImportError:
             pytest.skip("Switch package not available for parameter mapping test")
@@ -170,10 +185,16 @@ class TestSwitchCLIIntegration:
             mock_job_runner.run_async.return_value = 987654321  # Mock run ID
             mock_job_runner_class.return_value = mock_job_runner
             
-            with patch('switch.api.job_parameters.SwitchJobParameters') as mock_params_class:
-                mock_params = MagicMock()
-                mock_params.validate.return_value = None  # Validation passes
-                mock_params_class.return_value = mock_params
+            with patch('databricks.labs.lakebridge.cli._create_switch_job_parameters') as mock_create_params:
+                from switch.api.job_parameters import SwitchJobParameters
+                mock_params = SwitchJobParameters(
+                    input_dir="/Workspace/Users/test/sql_input",
+                    output_dir="/Workspace/Users/test/notebooks_output",
+                    result_catalog="test_catalog",
+                    result_schema="test_schema",
+                    sql_dialect="snowflake"
+                )
+                mock_create_params.return_value = (mock_params, False, 12345)  # async mode, job_id=12345
                 
                 # Execute Switch directly
                 result = cli._execute_switch_directly(mock_application_context, valid_transpile_config)
@@ -196,15 +217,14 @@ class TestSwitchCLIIntegration:
 
     def test_switch_job_execution_sync(self, mock_application_context, switch_config_path):
         """Test Switch job execution through Jobs API (sync mode with wait_for_completion)"""
-        # Create config with wait_for_completion option
-        config_with_wait = TranspileConfig(
+        # Create config for sync execution
+        config_for_sync = TranspileConfig(
             transpiler_config_path=str(switch_config_path),
             source_dialect="snowflake",
             input_source="/Workspace/Users/test/sql_input",
             output_folder="/Workspace/Users/test/notebooks_output",
             catalog_name="test_catalog",
-            schema_name="test_schema",
-            transpiler_options={"wait_for_completion": "true"}
+            schema_name="test_schema"
         )
 
         # Mock the switch.api components for synchronous execution
@@ -219,13 +239,19 @@ class TestSwitchCLIIntegration:
             mock_job_runner.run_sync.return_value = mock_run
             mock_job_runner_class.return_value = mock_job_runner
 
-            with patch('switch.api.job_parameters.SwitchJobParameters') as mock_params_class:
-                mock_params = MagicMock()
-                mock_params.validate.return_value = None
-                mock_params_class.return_value = mock_params
+            with patch('databricks.labs.lakebridge.cli._create_switch_job_parameters') as mock_create_params:
+                from switch.api.job_parameters import SwitchJobParameters
+                mock_params = SwitchJobParameters(
+                    input_dir="/Workspace/Users/test/sql_input",
+                    output_dir="/Workspace/Users/test/notebooks_output",
+                    result_catalog="test_catalog",
+                    result_schema="test_schema",
+                    sql_dialect="snowflake"
+                )
+                mock_create_params.return_value = (mock_params, True, 12345)  # sync mode, job_id=12345
 
-                # Execute Switch with wait option
-                result = cli._execute_switch_directly(mock_application_context, config_with_wait)
+                # Execute Switch with wait option (via config)
+                result = cli._execute_switch_directly(mock_application_context, config_for_sync)
 
                 # Verify synchronous execution results (returns list with single dict)
                 assert isinstance(result, list)
@@ -246,14 +272,16 @@ class TestSwitchCLIIntegration:
 class TestSwitchHelperFunctions:
     """Test Switch-specific helper functions"""
     
-    def test_get_switch_job_id(self, switch_config_path):
-        """Test job ID extraction from config"""
-        job_id = cli._get_switch_job_id()
+    def test_get_switch_job_id_from_config(self, switch_config_path):
+        """Test job ID extraction from config using new implementation"""
+        switch_config = TranspilerInstaller.read_switch_config()
+        job_id = switch_config.get('custom', {}).get('job_id') if switch_config else None
         assert job_id == 12345, "Should extract job ID from config"
     
     def test_get_switch_job_id_missing(self):
         """Test job ID extraction when config is missing"""
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.object(TranspilerInstaller, "transpilers_path", return_value=Path(temp_dir)):
-                job_id = cli._get_switch_job_id()
+                switch_config = TranspilerInstaller.read_switch_config()
+                job_id = switch_config.get('custom', {}).get('job_id') if switch_config else None
                 assert job_id is None, "Should return None when config missing"

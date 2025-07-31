@@ -61,7 +61,7 @@ import yaml
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound
 
-from databricks.labs.lakebridge.cli import _get_switch_job_id
+from databricks.labs.lakebridge.install import TranspilerInstaller
 
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class TestSwitchE2E:
             self._cleanup_all_switch_jobs(workspace_client)
         else:
             # Standard cleanup: Clean any existing Switch installation
-            job_id = _get_switch_job_id()
+            job_id = self._get_switch_job_id_from_config()
             if job_id:
                 logger.info(f"Cleaning up existing Switch job {job_id} before test")
                 try:
@@ -165,7 +165,7 @@ class TestSwitchE2E:
         logger.info("Step 3: Testing uninstallation")
         self._cleanup_switch_completely(workspace_client)
 
-        assert _get_switch_job_id() is None, "Switch config should be removed"
+        assert self._get_switch_job_id_from_config() is None, "Switch config should be removed"
         assert not self._verify_job_exists(workspace_client, new_job_id), f"Job {new_job_id} should be deleted"
         logger.info("Uninstallation successful")
 
@@ -310,7 +310,7 @@ class TestSwitchE2E:
             raise ValueError(f"Failed to install Switch: {e}") from e
 
         # Verify installation success
-        job_id = _get_switch_job_id()
+        job_id = self._get_switch_job_id_from_config()
         if job_id is None:
             raise ValueError("Switch job ID not found after installation")
 
@@ -385,6 +385,13 @@ class TestSwitchE2E:
         switch_path = Path.home() / ".databricks" / "labs" / "remorph-transpilers" / "switch" / "lib"
         with patch.object(TranspilerInstaller, 'install_from_pypi', return_value=switch_path):
             installer.install_switch()
+
+    def _get_switch_job_id_from_config(self):
+        """Get Switch job ID from config using new implementation"""
+        switch_config = TranspilerInstaller.read_switch_config()
+        if switch_config:
+            return switch_config.get('custom', {}).get('job_id')
+        return None
 
     # ==================== Execution Methods ====================
 
@@ -487,7 +494,7 @@ class TestSwitchE2E:
 
         try:
             # Primary cleanup using SwitchInstaller if available
-            job_id = _get_switch_job_id()
+            job_id = self._get_switch_job_id_from_config()
             if job_id:
                 logger.info(f"Found Switch job {job_id}, initiating cleanup")
                 self._uninstall_switch(workspace_client)
@@ -617,7 +624,7 @@ class TestSwitchE2E:
         try:
             from switch.api.installer import SwitchInstaller
 
-            job_id = _get_switch_job_id()
+            job_id = self._get_switch_job_id_from_config()
 
             # Use SwitchInstaller to uninstall
             installer = SwitchInstaller(workspace_client)
@@ -635,7 +642,7 @@ class TestSwitchE2E:
         except ImportError:
             # Fallback if Switch package not available
             logger.warning("Switch package not available, using manual cleanup")
-            job_id = _get_switch_job_id()
+            job_id = self._get_switch_job_id_from_config()
             if job_id:
                 self._cleanup_databricks_job(workspace_client, job_id)
             self._cleanup_local_switch_files()

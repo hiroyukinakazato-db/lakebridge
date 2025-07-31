@@ -121,55 +121,76 @@ def _is_switch_transpiler_request(transpiler_config_path: str | None) -> bool:
         return False
 
 
-def _get_switch_job_id() -> int | None:
-    """Get Switch job ID from config.yml."""
-    try:
-        import yaml
+def _create_switch_job_parameters(config: TranspileConfig) -> tuple['SwitchJobParameters', bool, int]:
+    """Create Switch job parameters from TranspileConfig and Switch configuration.
 
-        # First check if the config file exists in the expected location
-        transpilers_path = TranspilerInstaller.transpilers_path()
-        switch_config_path = transpilers_path / "switch" / "lib" / "config.yml"
-        
-        if not switch_config_path.exists():
-            # Fallback: try to get from TranspilerInstaller if available
-            try:
-                config_path = TranspilerInstaller.transpiler_config_path("switch")
-            except ValueError:
-                return None
-        else:
-            config_path = switch_config_path
-            
-        with open(config_path, 'r') as f:
-            config_data = yaml.safe_load(f)
+    Returns:
+        Tuple of (SwitchJobParameters, wait_for_completion flag, job_id)
+    """
+    from switch.api.job_parameters import SwitchJobParameters
 
-        return config_data.get('custom', {}).get('job_id')
-    except Exception:
-        return None
+    # Read Switch configuration to get all available options
+    switch_config = TranspilerInstaller.read_switch_config()
+    if not switch_config:
+        raise ValueError("Failed to read Switch configuration. Please check Switch installation.")
+
+    # Get job ID from custom section
+    job_id = switch_config.get('custom', {}).get('job_id')
+    if not job_id:
+        raise ValueError(
+            "Switch job not found. Please run 'lakebridge install-transpiler' first."
+        )
+
+    # Extract options from Switch config
+    config_options = switch_config.get('options', {}).get('all', [])
+
+    # Build a mapping of option flags to their default values
+    switch_defaults = {}
+    for option in config_options:
+        flag = option.get('flag')
+        default_value = option.get('default')
+        if flag and default_value is not None:
+            # Handle special default values
+            if default_value == "<none>":
+                default_value = None
+            switch_defaults[flag] = default_value
+
+    # Create SwitchJobParameters with explicit parameter mapping
+    switch_params = SwitchJobParameters(
+        # Required parameters from TranspileConfig
+        input_dir=config.input_source,
+        output_dir=config.output_folder,
+        result_catalog=config.catalog_name,
+        result_schema=config.schema_name,
+        sql_dialect=config.source_dialect,
+
+        # Optional parameters from Switch config defaults
+        endpoint_name=switch_defaults.get('endpoint_name', 'databricks-claude-sonnet-4'),
+        token_count_threshold=switch_defaults.get('token_count_threshold', 20000),
+        concurrency=switch_defaults.get('concurrency', 4),
+        comment_lang=switch_defaults.get('comment_lang', 'English'),
+        max_fix_attempts=switch_defaults.get('max_fix_attempts', 1),
+        log_level=switch_defaults.get('log_level', 'INFO'),
+        conversion_prompt_yaml=switch_defaults.get('conversion_prompt_yaml'),
+        existing_result_table=switch_defaults.get('existing_result_table'),
+        sql_output_dir=switch_defaults.get('sql_output_dir'),
+    )
+
+    # Extract wait_for_completion flag
+    wait_for_completion = str(switch_defaults.get('wait_for_completion', 'false')).lower() == 'true'
+
+    return switch_params, wait_for_completion, job_id
 
 
 def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -> dict:
     """Execute Switch transpiler using existing workspace job."""
     try:
         from switch.api.job_runner import SwitchJobRunner
-        from switch.api.job_parameters import SwitchJobParameters
 
         logger.info("Executing Switch transpiler using Jobs API")
 
-        # Get job ID from config first
-        job_id = _get_switch_job_id()
-        if not job_id:
-            raise ValueError(
-                "Switch job not found. Please run 'lakebridge install-transpiler' first."
-            )
-
-        # Create Switch job parameters - let Switch handle comprehensive validation
-        switch_params = SwitchJobParameters(
-            input_dir=config.input_source,
-            output_dir=config.output_folder,
-            result_catalog=config.catalog_name,
-            result_schema=config.schema_name,
-            sql_dialect=config.source_dialect,
-        )
+        # Create Switch job parameters from config
+        switch_params, wait_for_completion, job_id = _create_switch_job_parameters(config)
 
         # Use Switch's comprehensive validation with require_all=True
         try:
@@ -177,16 +198,9 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
         except ValueError as validation_error:
             raise ValueError(f"Switch parameter validation failed: {validation_error}") from validation_error
 
-        # Initialize job runner
+        # Run job based on wait preference
         job_runner = SwitchJobRunner(ctx.workspace_client, job_id)
 
-        # Check wait_for_completion from transpiler_options
-        wait_for_completion = False
-        if config.transpiler_options and isinstance(config.transpiler_options, dict):
-            wait_option = config.transpiler_options.get("wait_for_completion", "false")
-            wait_for_completion = str(wait_option).lower() == "true"
-
-        # Run job based on wait preference
         if wait_for_completion:
             logger.info(f"Starting Switch job {job_id} (waiting for completion)...")
             run = job_runner.run_sync(switch_params)
@@ -205,7 +219,7 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
             logger.info(f"Starting Switch job {job_id}...")
             run_id = job_runner.run_async(switch_params)
             logger.info(f"Switch job started with run ID: {run_id}")
-            
+
             # Format result for asynchronous execution
             return [{
                 "transpiler": "switch",
