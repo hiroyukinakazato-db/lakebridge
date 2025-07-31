@@ -129,6 +129,21 @@ class TranspilerInstaller(abc.ABC):
         return config.path
 
     @classmethod
+    def read_switch_config(cls) -> dict | None:
+        """Read Switch config.yml file.
+
+        Returns:
+            dict: Parsed config data or None if reading fails
+        """
+        try:
+            import yaml
+            config_path = cls.transpiler_config_path("switch")
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except Exception:
+            return None
+
+    @classmethod
     def transpiler_config_options(cls, transpiler_name, source_dialect) -> list[LSPConfigOptionV1]:
         config = cls.all_transpiler_configs().get(transpiler_name, None)
         if not config:
@@ -584,27 +599,13 @@ class WorkspaceInstaller:
             logger.error(f"Failed to deploy Switch to workspace: {e}")
             raise RuntimeError(f"Switch workspace deployment failed: {e}") from e
 
-    def _read_switch_config(self) -> dict | None:
-        """Read Switch config.yml file.
-        
-        Returns:
-            dict: Parsed config data or None if reading fails
-        """
-        try:
-            import yaml
-            config_path = TranspilerInstaller.transpiler_config_path("switch")
-            with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
-        except Exception:
-            return None
-
     def _get_previous_switch_installation(self) -> tuple[int | None, str | None]:
         """Extract previous Switch installation info from config for cleanup.
         
         Returns:
             tuple: (previous_job_id, previous_switch_home) or (None, None) if not found
         """
-        config_data = self._read_switch_config()
+        config_data = TranspilerInstaller.read_switch_config()
         if not config_data:
             logger.debug("No previous Switch installation found or config read failed")
             return None, None
@@ -620,7 +621,7 @@ class WorkspaceInstaller:
 
     def _update_switch_config(self, install_result):
         """Update Switch config.yml with job deployment information."""
-        config_data = self._read_switch_config()
+        config_data = TranspilerInstaller.read_switch_config()
         if not config_data:
             logger.warning("Failed to read Switch config for update")
             return

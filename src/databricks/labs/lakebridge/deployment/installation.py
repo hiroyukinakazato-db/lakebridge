@@ -1,4 +1,5 @@
 import logging
+import shutil
 from ast import literal_eval
 from pathlib import Path
 
@@ -121,5 +122,69 @@ class WorkspaceInstallation:
         if config.reconcile:
             self._recon_deployment.uninstall(config.reconcile)
 
+        self._uninstall_switch()
+
         self._installation.remove()
         logger.info("Uninstallation completed successfully.")
+
+    def _uninstall_switch(self) -> None:
+        """Uninstall Switch transpiler if installed."""
+        try:
+            # Check if Switch transpiler is installed
+            from databricks.labs.lakebridge.install import TranspilerInstaller
+            switch_config_path = TranspilerInstaller.transpiler_config_path("switch")
+            if not switch_config_path.exists():
+                logger.debug("Switch transpiler not found, skipping uninstall")
+                return
+
+            # Read config and uninstall from workspace if needed
+            config_data = TranspilerInstaller.read_switch_config()
+            if not config_data:
+                logger.warning("Switch config is empty, skipping workspace cleanup")
+            else:
+                custom = config_data.get('custom', {})
+                job_id = custom.get('job_id')
+                switch_home = custom.get('switch_home')
+
+                if job_id or switch_home:
+                    self._uninstall_switch_from_workspace(job_id, switch_home)
+
+            # Always try to remove local directory
+            self._remove_switch_local_directory()
+
+        except Exception as e:
+            logger.error(f"Unexpected error during Switch uninstall: {e}")
+
+    def _uninstall_switch_from_workspace(self, job_id: int | None, switch_home: str | None) -> None:
+        """Uninstall Switch from workspace using SwitchInstaller."""
+        logger.info(f"Found Switch installation: job_id={job_id}, switch_home={switch_home}")
+        
+        try:
+            from switch.api.installer import SwitchInstaller
+            
+            switch_installer = SwitchInstaller(self._ws)
+            result = switch_installer.uninstall(job_id=job_id, switch_home=switch_home)
+            
+            if result.success:
+                logger.info(f"Switch workspace cleanup completed: {result.message}")
+            else:
+                logger.warning(f"Switch workspace cleanup partially failed: {result.message}")
+
+        except ImportError:
+            logger.warning("Switch package not available, skipping workspace cleanup. "
+                         "Please manually delete the job and workspace files if needed.")
+        except Exception as e:
+            logger.error(f"Failed to uninstall Switch from workspace: {e}")
+
+    def _remove_switch_local_directory(self) -> None:
+        """Remove local Switch transpiler directory."""
+        from databricks.labs.lakebridge.install import TranspilerInstaller
+        switch_transpiler_path = TranspilerInstaller.transpilers_path() / "switch"
+        if not switch_transpiler_path.exists():
+            return
+
+        try:
+            shutil.rmtree(switch_transpiler_path)
+            logger.info(f"Removed Switch transpiler from {switch_transpiler_path}")
+        except Exception as e:
+            logger.error(f"Failed to remove Switch transpiler directory: {e}")
