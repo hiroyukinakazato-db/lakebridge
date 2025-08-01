@@ -65,7 +65,7 @@ def switch_config_path():
                     {"flag": "endpoint_name", "method": "QUESTION", "prompt": "Model endpoint name", "default": "databricks-claude-sonnet-4"},
                     {"flag": "token_count_threshold", "method": "QUESTION", "prompt": "Token count threshold", "default": 20000},
                     {"flag": "concurrency", "method": "QUESTION", "prompt": "Concurrency level", "default": 4},
-                    {"flag": "comment_lang", "method": "CHOICE", "prompt": "Comment language", "choices": ["English", "Japanese", "Chinese", "Spanish", "French", "German"], "default": "English"},
+                    {"flag": "comment_lang", "method": "CHOICE", "prompt": "Comment language", "choices": ["English", "Japanese", "Chinese", "French", "German", "Italian", "Korean", "Portuguese", "Spanish"], "default": "English"},
                     {"flag": "max_fix_attempts", "method": "QUESTION", "prompt": "Maximum fix attempts", "default": 1},
                     {"flag": "log_level", "method": "CHOICE", "prompt": "Log level", "choices": ["DEBUG", "INFO", "WARNING", "ERROR"], "default": "INFO"},
                     {"flag": "conversion_prompt_yaml", "method": "QUESTION", "prompt": "Custom conversion prompt YAML file path", "default": "<none>"},
