@@ -157,29 +157,32 @@ def _create_switch_job_parameters(config: TranspileConfig) -> tuple['SwitchJobPa
 
     # Create SwitchJobParameters with explicit parameter mapping
     switch_params = SwitchJobParameters(
-        # Basic settings - where to read/write
+        # Basic settings
         input_dir=config.input_source,
         output_dir=config.output_folder,
         result_catalog=config.catalog_name,
         result_schema=config.schema_name,
         prompt_template=config.source_dialect,
 
-        # Conversion settings - what and how to convert
+        # Conversion settings
         source_format=switch_defaults.get('source_format'),
         target_type=switch_defaults.get('target_type'),
         output_extension=switch_defaults.get('output_extension'),
 
-        # Execution settings - how to run
+        # Execution settings
         endpoint_name=switch_defaults.get('endpoint_name'),
         concurrency=switch_defaults.get('concurrency'),
         max_fix_attempts=switch_defaults.get('max_fix_attempts'),
         log_level=switch_defaults.get('log_level'),
 
-        # Advanced settings - detailed customization
+        # Advanced settings
         token_count_threshold=switch_defaults.get('token_count_threshold'),
         comment_lang=switch_defaults.get('comment_lang'),
         conversion_prompt_yaml=switch_defaults.get('conversion_prompt_yaml'),
         sql_output_dir=switch_defaults.get('sql_output_dir'),
+
+        # Complex optional parameters
+        request_params=switch_defaults.get('request_params'),
     )
 
     # Extract wait_for_completion flag
