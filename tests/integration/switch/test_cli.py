@@ -160,7 +160,7 @@ class TestSwitchCLIIntegration:
             assert params.output_dir == "/Workspace/Users/test/notebooks_output"
             assert params.result_catalog == "test_catalog"
             assert params.result_schema == "test_schema"
-            assert params.sql_dialect == "snowflake"
+            assert params.prompt_template.value == "snowflake"
             
             # Verify parameters from Switch config defaults
             assert params.endpoint_name == "databricks-claude-sonnet-4"
@@ -192,7 +192,7 @@ class TestSwitchCLIIntegration:
                     output_dir="/Workspace/Users/test/notebooks_output",
                     result_catalog="test_catalog",
                     result_schema="test_schema",
-                    sql_dialect="snowflake"
+                    prompt_template="snowflake"
                 )
                 mock_create_params.return_value = (mock_params, False, 12345)  # async mode, job_id=12345
                 
@@ -246,7 +246,7 @@ class TestSwitchCLIIntegration:
                     output_dir="/Workspace/Users/test/notebooks_output",
                     result_catalog="test_catalog",
                     result_schema="test_schema",
-                    sql_dialect="snowflake"
+                    prompt_template="snowflake"
                 )
                 mock_create_params.return_value = (mock_params, True, 12345)  # sync mode, job_id=12345
 
