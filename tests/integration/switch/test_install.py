@@ -208,16 +208,16 @@ class TestSwitchInstallationProcess:
                 product_info=None, resource_configurator=None, workspace_installation=None
             )
 
-            # Test SwitchInstaller import error (実装: warning出力して正常終了)
+            # Test SwitchInstaller import error (implementation: output warning and continue normally)
             with patch('switch.api.installer.SwitchInstaller', side_effect=ImportError("Switch package not available")):
                 with caplog.at_level(logging.WARNING):
-                    installer.install_switch()  # 正常終了するはず
+                    installer.install_switch()  # should complete normally
                     
-                # warning メッセージが出力されることを確認
+                # verify warning message is logged
                 assert "Switch package not available for workspace deployment" in caplog.text
                 logger.info("ImportError handling verified: warning logged, no exception raised")
 
-            # Test SwitchInstaller.install() failure (実装: RuntimeError として再raise)
+            # Test SwitchInstaller.install() failure (implementation: re-raise as RuntimeError)
             with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
                 mock_installer = MagicMock()
                 mock_installer.install.side_effect = Exception("Job creation failed")
@@ -239,12 +239,12 @@ class TestSwitchInstallationProcess:
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
 
-            # Test missing config file (実装: Noneを返す)
+            # Test missing config file (implementation: return None)
             config = TranspilerInstaller.read_switch_config()
             assert config is None, "Config file not found should return None"
             logger.info("Missing config file handling verified: None returned")
 
-            # Test invalid config file (実装: Noneを返す)
+            # Test invalid config file (implementation: return None)
             with config_path.open("w") as f:
                 f.write("invalid: yaml: content: [")
 
@@ -252,8 +252,8 @@ class TestSwitchInstallationProcess:
             assert config is None, "Invalid YAML should return None"
             logger.info("Invalid YAML handling verified: None returned")
 
-            # Test valid config file (実装: パース結果を返す)
-            # 実際のSwitch config構造を使用（version: 1が必要）
+            # Test valid config file (implementation: return parsed result)
+            # Use actual Switch config structure (version: 1 is required)
             valid_config = {
                 "remorph": {
                     "version": 1,
