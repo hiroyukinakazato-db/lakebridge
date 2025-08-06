@@ -162,7 +162,7 @@ def _create_switch_job_parameters(config: TranspileConfig) -> tuple['SwitchJobPa
         output_dir=config.output_folder,
         result_catalog=config.catalog_name,
         result_schema=config.schema_name,
-        prompt_template=config.source_dialect,
+        builtin_prompt=config.source_dialect,
 
         # Conversion settings
         source_format=switch_defaults.get('source_format'),

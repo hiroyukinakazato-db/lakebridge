@@ -230,7 +230,7 @@ class TestSwitchInstallationProcess:
 
             logger.info("Error handling tests completed successfully")
 
-    def test_config_validation(self, tmp_path, minimal_workspace_installer):
+    def test_config_validation(self, tmp_path):
         """Test config file validation and error handling"""
         from databricks.labs.lakebridge.install import TranspilerInstaller
         
