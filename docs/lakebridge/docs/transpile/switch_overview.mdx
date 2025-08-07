@@ -108,10 +108,6 @@ Convert non-SQL files to notebooks or other formats without preprocessing.
 | `scala` | Scala Code → Databricks Python Notebook |
 | `airflow` | Airflow DAG → Databricks Jobs YAML |
 
-### Latest Built-in Prompts
-
-For the most current and complete list of built-in prompts, see the [databricks-switch-plugin](https://pypi.org/project/databricks-switch-plugin/) package on PyPI, as new conversion types are added regularly.
-
 ### Custom Prompt Support
 
 Switch's LLM-based architecture supports additional conversion types through custom YAML conversion prompts, making it extensible beyond built-in options.
@@ -279,15 +275,46 @@ The **`00_main`** notebook serves as the entry point when Switch is executed via
 - Handles orchestrator results and displays final conversion summary
 - Provides unified entry point for both notebook and file conversion workflows
 
-#### Conversion Flow
+#### Conversion Flow Overview
+
+Switch supports two target types with different processing workflows. The main entry point (`00_main`) routes to the appropriate orchestrator based on the `target_type` parameter:
 
 ```mermaid
 flowchart TD
-    main[00_main] -->|target_type=notebook| orchestrator[orchestrate_to_notebook]
+    main["00_main (Entry Point)"] --> decision{target_type?}
     
-    orchestrator -->|sequentially calls| processing
+    decision -->|notebook| notebookOrch["orchestrate_to_notebook (Full Processing Pipeline)"]
+    decision -->|file| fileOrch["orchestrate_to_file (Simplified Processing Pipeline)"]
     
-    subgraph processing ["Processing Workflow"]
+    notebookOrch --> notebookFlow["7-Step Workflow: analyze → convert → validate → fix → split → export → sql_convert(optional)"]
+    fileOrch --> fileFlow["3-Step Workflow: analyze → convert → export"]
+    
+    notebookFlow --> notebookOutput[Python/SQL Notebooks]
+    fileFlow --> fileOutput["Generic Files (YAML, JSON, etc.)"]
+
+    %% Styling
+    classDef entry fill:#FFE6CC,stroke:#333,stroke-width:3px;
+    classDef decision fill:#FFD700,stroke:#333,stroke-width:2px;
+    classDef orchestrator fill:#E6F3FF,stroke:#333,stroke-width:2px;
+    classDef workflow fill:#F0F8FF,stroke:#333,stroke-width:1px,stroke-dasharray: 3 3;
+    classDef output fill:#E0F0E0,stroke:#333,stroke-width:2px;
+    
+    class main entry;
+    class decision decision;
+    class notebookOrch,fileOrch orchestrator;
+    class notebookFlow,fileFlow workflow;
+    class notebookOutput,fileOutput output;
+```
+
+#### Notebook Conversion Flow
+
+For `target_type=notebook`, the `orchestrate_to_notebook` orchestrator executes a comprehensive 7-step processing pipeline:
+
+```mermaid
+flowchart TD
+    orchestrator[orchestrate_to_notebook] -->|sequentially calls| processing
+    
+    subgraph processing ["Notebook Processing Workflow"]
         direction TB
         analyze[analyze_input_files] --> convert[convert_with_llm]
         convert --> validate[validate_python_notebook]
@@ -307,14 +334,12 @@ flowchart TD
     sqlExport -.-> sqlNotebooks["SQL Notebooks<br>(Optional Output)"]
 
     %% Styling
-    classDef entry fill:#FFE6CC,stroke:#333,stroke-width:3px;
     classDef orchestrator fill:#E6F3FF,stroke:#333,stroke-width:2px;
     classDef process fill:#E6E6FA,stroke:#333,stroke-width:2px;
     classDef data fill:#E0F0E0,stroke:#333,stroke-width:2px;
     classDef external fill:#FFF0DB,stroke:#333,stroke-width:2px;
     classDef optional fill:#F0F0F0,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5;
     
-    class main entry;
     class orchestrator orchestrator;
     class analyze,convert,validate,fix,split,export process;
     class sqlExport optional;
@@ -323,7 +348,46 @@ flowchart TD
     class endpoint external;
 ```
 
-The orchestrator executes each processing notebook sequentially using `dbutils.notebook.run()`. The following sections describe each processing step in the workflow:
+#### File Conversion Flow
+
+For `target_type=file`, the `orchestrate_to_file` orchestrator uses a simplified 3-step processing pipeline optimized for generic file output:
+
+```mermaid
+flowchart TD
+    orchestrator[orchestrate_to_file] -->|sequentially calls| processing
+    
+    subgraph processing ["File Processing Workflow"]
+        direction TB
+        analyze[analyze_input_files] --> convert[convert_with_llm]
+        convert --> export[export_to_file]
+    end
+    
+    processing <-->|Read & Write| table[Conversion Result Table]
+    
+    convert -.->|Uses| endpoint[Model Serving Endpoint]
+    
+    export --> files["Generic Files (YAML, JSON, XML, etc.)"]
+
+    %% Styling
+    classDef orchestrator fill:#E6F3FF,stroke:#333,stroke-width:2px;
+    classDef process fill:#E6E6FA,stroke:#333,stroke-width:2px;
+    classDef data fill:#E0F0E0,stroke:#333,stroke-width:2px;
+    classDef external fill:#FFF0DB,stroke:#333,stroke-width:2px;
+    
+    class orchestrator orchestrator;
+    class analyze,convert,export process;
+    class table,files data;
+    class endpoint external;
+```
+
+**Key Differences:**
+- **File conversion skips** syntax validation, error fixing, and cell splitting steps
+- **Direct export** from converted content to specified file format with custom extension
+- **Optimized** for non-notebook outputs like YAML workflows, JSON configurations, etc.
+
+### Processing Steps
+
+The following sections describe each processing step used in the workflows above:
 
 #### analyze_input_files
 Scans the input directory for files and performs initial analysis. For SQL sources, it removes comments and normalizes whitespace to get accurate token counts using model-specific tokenizers (Claude uses ~3.4 characters per token, OpenAI uses tiktoken). Files exceeding the `token_count_threshold` are excluded from conversion. All file metadata and analysis results are stored in a timestamped Delta table.
@@ -394,13 +458,14 @@ Switch creates Delta tables with the following complete schema:
 | `result_processing_time_seconds` | float | Processing time in seconds (initially null) |
 | `result_timestamp` | timestamp | UTC timestamp when processing completed (initially null) |
 | `result_error` | string | Any conversion errors encountered (initially null) |
-| `result_python_parse_error` | string | Python syntax errors found using ast.parse |
+| `result_python_parse_error` | string | Python syntax errors found using ast.parse (initially null) |
 | `result_extracted_sqls` | array<string> | SQL statements extracted from Python code (initially null) |
 | `result_sql_parse_errors` | array<string> | SQL syntax errors found using EXPLAIN (initially null) |
-| `source_format` | string | Source format type (sql or generic) |
-| `target_type` | string | Output type (notebook or file) |
-| `output_extension` | string | File extension for file outputs |
-| `builtin_prompt` | string | Built-in prompt used for conversion |
+| `export_output_path` | string | Path to the exported file (initially null) |
+| `export_status` | string | Export processing status (initially null) |
+| `export_error` | string | Export error information (initially null) |
+| `export_timestamp` | timestamp | UTC timestamp when export completed (initially null) |
+| `export_content_size_bytes` | long | Size of exported content in bytes (initially null) |
 
 ### Model Requirements
 
@@ -434,7 +499,7 @@ For organizations with specific requirements (such as Azure-only policies, custo
 LLMs have limits on how much text they can process at once. Switch uses a simple threshold approach:
 
 **How it works:**
-- Stage 1 analyzes each SQL file and counts tokens (after removing comments and compressing multiple spaces into a single space)
+- The `analyze_input_files` processor analyzes each file and counts tokens (after removing comments and compressing whitespace for SQL sources)
 - Files with token count ≤ `token_count_threshold` are marked for conversion
 - Files exceeding the threshold are skipped with status "Not converted"
 
@@ -449,7 +514,7 @@ LLMs have limits on how much text they can process at once. Switch uses a simple
 - Optimal values may vary by model and environment - test in your specific setup for best results
 
 **Managing large files:**
-If your SQL files exceed the threshold, consider logical splitting points:
+If your input files exceed the threshold, consider logical splitting points:
 - Separate stored procedures into individual files
 - Split by functional modules or business domains
 - Maintain referential integrity across split files
@@ -542,23 +607,25 @@ few_shots:
 
 ### Reference: Built-in YAML Files
 
-Switch includes built-in YAML configuration files for each supported SQL dialect. When creating custom prompts, these built-in configurations serve as excellent starting points - even for supported dialects, customizing the default prompts based on your specific input patterns can significantly improve conversion accuracy.
+Switch includes built-in YAML configuration files for supported conversion types, including SQL dialects and other source formats. When creating custom prompts, these built-in configurations serve as excellent starting points - even for supported conversion types, customizing the default prompts based on your specific input patterns can significantly improve conversion accuracy.
 
-**Location**: You can find example YAML files in the `pyscripts/conversion_prompt_yaml/` directory within the same workspace folder as the main Switch notebook (`00_main`). These files demonstrate the proper structure and provide dialect-specific examples that you can adapt for your custom requirements.
+**Location**: You can find built-in YAML files in the `switch/resources/builtin_prompts/` directory within the Switch installation. These files demonstrate the proper structure and provide conversion-specific examples that you can adapt for your custom requirements.
 
 ### FAQ: Can Switch Support My Source System?
 
-A common question is whether Switch can handle sources beyond the built-in SQL dialects. The answer is: **try it!**
+A common question is whether Switch can handle sources beyond the built-in conversion types. The answer is: **try it!**
+
+Switch already supports various source formats including SQL dialects (MySQL, Snowflake, Oracle, etc.), programming languages (Python scripts, Scala code), and workflows (Airflow DAGs).
 
 **For SQL-based sources**: Creating a custom prompt YAML file should work well for most SQL dialects. Since LLMs understand SQL syntax patterns, you can typically achieve good results by:
-- Starting with a similar built-in dialect's YAML as a template
+- Starting with a similar built-in dialect's YAML as a template  
 - Adding specific syntax examples from your source system
 - Testing and iterating based on results
 
-**For non-SQL sources**: Switch's LLM-based architecture means it can potentially handle other code-to-notebook conversions (e.g., converting Python scripts, R code, or other programming languages to Databricks notebooks). Modern LLMs have strong code comprehension capabilities across many programming languages. While these use cases haven't been extensively tested, you can experiment by:
+**For other source formats**: Switch's LLM-based architecture means it can potentially handle various conversions beyond the built-in types. Modern LLMs have strong comprehension capabilities across many languages and formats. You can experiment by:
 - Creating custom prompts that define your source format
 - Providing clear conversion examples in the few-shots section
-- Testing with representative code samples
+- Testing with representative source samples
 
 Rather than waiting for additional built-in examples, we encourage experimentation with custom prompts. The flexibility of LLM-based conversion means many use cases are possible with the right prompt engineering.
 
@@ -590,17 +657,21 @@ These files were successfully processed by the LLM but the generated code contai
 **Cause**: Files were converted but contain syntax errors
 
 **Solutions**:
-- Review syntax error messages at the bottom of output notebooks
-- Manually fix errors in the converted notebooks
+- Review syntax error messages in the result table's error_details column
+- Manually fix errors in the converted notebooks/files
 - Increase `max_fix_attempts` for more automatic error correction attempts
 
-### Export Failures (Status: "Not exported")
+### Export Failures (Status: "Export failed" or "Not exported")
 
-These files were converted successfully but couldn't be exported as notebooks due to size limitations. This is a rare occurrence that typically only happens with exceptionally large or complex SQL files.
+These files were converted successfully but couldn't be exported to the output directory.
 
-**Cause**: Converted content exceeds 10MB size limit
+**Causes**: 
+- Content exceeds 10MB size limit (notebooks)
+- File system permissions issues
+- Invalid output paths
 
 **Solutions**:
-- Check the result table for excessive code generation or repetitive patterns in the LLM output
-- Manually split the converted content into multiple notebooks
-- Consider splitting the original SQL file into smaller logical units and re-running the conversion
+- Check the `export_error` column in the result table for specific error details
+- For size issues: Manually split large converted content into smaller units
+- For permission issues: Verify workspace access to the output directory
+- For path issues: Ensure output directory paths are valid workspace locations
