@@ -5,7 +5,7 @@ sidebar_position: 4
 
 import CodeBlock from '@theme/CodeBlock';
 
-**Switch** is a Lakebridge transpiler plugin that uses Large Language Models (LLMs) to convert SQL code into Databricks notebooks. Switch leverages [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) to understand SQL intent and semantics, generating equivalent Python notebooks with Spark SQL.
+**Switch** is a Lakebridge transpiler plugin that uses Large Language Models (LLMs) to convert SQL and other source formats into Databricks notebooks or generic files. Switch leverages [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) to understand code intent and semantics, generating equivalent Python notebooks with Spark SQL or other target formats.
 
 This LLM-powered approach excels at converting complex stored procedures, business logic, and ETL workflows where context and intent matter more than syntactic transformation. While generated notebooks may require manual adjustments, they provide a valuable foundation for Databricks migration.
 
@@ -29,8 +29,26 @@ Switch runs entirely within the Databricks platform:
 - **Parallel Processing**: Concurrent model serving endpoint calls for multiple files
 
 ### Flexible Output Formats
-- **Primary Output**: Python notebooks containing Spark SQL
+- **Notebooks**: Python notebooks containing Spark SQL (primary output)
+- **Generic Files**: YAML workflows, JSON configurations, and other text formats
 - **Experimental**: Additional SQL notebook output converted from generated Python notebooks
+
+---
+
+## Source Format Support
+
+Switch supports multiple source formats with flexible preprocessing:
+
+### SQL Sources (Default)
+- **Preprocessing**: Automatic SQL comment removal and whitespace normalization
+- **Use Cases**: Traditional SQL migration from various dialects
+- **Parameter**: `--source-format sql` (default)
+
+### Generic Sources
+- **Preprocessing**: None - preserves original content
+- **Use Cases**: XML workflows, configuration files, code in other languages
+- **Parameter**: `--source-format generic`
+- **Examples**: Informatica XML to Databricks Jobs YAML, Python scripts to notebooks, Airflow DAGs to Databricks Jobs
 
 ---
 
@@ -122,12 +140,12 @@ Configuration is saved to:
 Use the following command to run Switch. Specifying the Switch config file with `--transpiler-config-path` tells Lakebridge to use Switch as the transpiler. Add `--output json` for structured output with job monitoring details:
 
 ```bash
-# Switch usage
+# Switch usage - SQL to notebooks conversion
 databricks labs lakebridge transpile \
   --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
   --input-source /Workspace/path/to/sql \
   --output-folder /Workspace/path/to/notebooks \
-  --source-dialect snowflake \
+  --builtin-prompt snowflake \
   --catalog-name your_existing_catalog \
   --schema-name your_existing_schema \
   --output json
@@ -142,6 +160,50 @@ When executing the above command, the response will look like this:
   "run_id": 67890,
   "run_url": "https://your-workspace.databricks.com/#job/12345/run/67890"
 }
+```
+
+### Example: Generic File Conversions
+
+Beyond SQL, Switch supports converting various source formats to different output types:
+
+```bash
+# Example 1: Python scripts to notebooks
+databricks labs lakebridge transpile \
+  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
+  --builtin-prompt python \
+  --source-format generic \
+  --target-type notebook \
+  --input-source "/Workspace/python_scripts" \
+  --output-folder "/Workspace/notebooks" \
+  --catalog-name your_catalog \
+  --schema-name your_schema \
+  --output json
+
+# Example 2: Airflow DAGs to Databricks Jobs YAML
+databricks labs lakebridge transpile \
+  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
+  --builtin-prompt airflow \
+  --source-format generic \
+  --target-type file \
+  --output-extension .yml \
+  --input-source "/Workspace/airflow_dags" \
+  --output-folder "/Workspace/databricks_jobs" \
+  --catalog-name your_catalog \
+  --schema-name your_schema \
+  --output json
+
+# Example 3: SQL to YAML workflows
+databricks labs lakebridge transpile \
+  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
+  --builtin-prompt snowflake \
+  --source-format sql \
+  --target-type file \
+  --output-extension .yml \
+  --input-source "/Workspace/sql/procedures" \
+  --output-folder "/Workspace/workflows" \
+  --catalog-name your_catalog \
+  --schema-name your_schema \
+  --output json
 ```
 
 For advanced configuration options, see the [Advanced Configuration](#advanced-configuration) section below.
@@ -159,12 +221,17 @@ Switch operates differently from other Lakebridge transpilers:
 
 #### Required Parameters
 - `--transpiler-config-path` - Local path to Switch configuration file (identifies Switch as the transpiler)
-- `--input-source` - Databricks workspace path(s) containing SQL files to convert (see Input Source Patterns below)
-- `--output-folder` - Databricks workspace path for generated notebooks
-- `--source-dialect` - SQL dialect. Choose from: `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `teradata`, `tsql`
+- `--input-source` - Databricks workspace path(s) containing files to convert (see Input Source Patterns below)
+- `--output-folder` - Databricks workspace path for generated outputs
+- `--builtin-prompt` - Built-in conversion prompt to use. Options include SQL dialects (`mysql`, `snowflake`, `oracle`, `postgresql`, `redshift`, `teradata`, `netezza`, `tsql`), code conversions (`python`, `scala`), and workflow conversions (`airflow`)
 - `--catalog-name` - Databricks catalog for state tables. Must already exist.
 - `--schema-name` - Databricks schema for state tables. Must already exist.
   - Note: The user must have `CREATE TABLE` permissions on the specified catalog and schema for Switch's state management and intermediate result tables.
+
+#### Optional Parameters
+- `--source-format` - Source file format type. Choose from: `sql`, `generic` (default: `sql`)
+- `--target-type` - Output format type. Choose from: `notebook`, `file` (default: `notebook`)
+- `--output-extension` - File extension when using `--target-type file` (e.g., `.yml`, `.json`)
 
 #### Input Source Patterns
 

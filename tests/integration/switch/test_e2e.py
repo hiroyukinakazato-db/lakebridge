@@ -465,9 +465,9 @@ class TestSwitchE2E:
     def _install_switch_from_testpypi(self):
         """Install Switch from TestPyPI with proper setup
 
-        Why special handling: TestPyPI packages aren't on PyPI.org, causing
-        TranspilerInstaller.install_from_pypi() to fail with 404. We install
-        directly from TestPyPI then mock the PyPI step.
+        Why special handling: During development, Switch is only on TestPyPI.
+        We need to install it directly into the test environment for the
+        workspace deployment to work correctly.
         """
         # First install the package from TestPyPI
         subprocess.run([
@@ -501,9 +501,8 @@ class TestSwitchE2E:
         logger.info(f"Copied Switch config from {source_config} to {target_config}")
 
     def _install_switch_via_api_with_mock(self):
-        """Install Switch using API with mocked PyPI install"""
-        from unittest.mock import patch
-        from databricks.labs.lakebridge.install import TranspilerInstaller, WorkspaceInstaller
+        """Install Switch using API (requires Switch package to be pre-installed)"""
+        from databricks.labs.lakebridge.install import WorkspaceInstaller
         from databricks.labs.lakebridge.contexts.application import ApplicationContext
         from databricks.sdk import WorkspaceClient
 
@@ -523,10 +522,8 @@ class TestSwitchE2E:
             app_context.workspace_installation,
         )
 
-        # Mock install_from_pypi to succeed
-        switch_path = Path.home() / ".databricks" / "labs" / "remorph-transpilers" / "switch" / "lib"
-        with patch.object(TranspilerInstaller, 'install_from_pypi', return_value=switch_path):
-            installer.install_switch()
+        # Install Switch to workspace (Switch package should be pre-installed)
+        installer.install_switch()
 
     def _get_switch_job_id_from_config(self):
         """Get Switch job ID from config using new implementation"""

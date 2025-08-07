@@ -2,6 +2,7 @@ import re
 import abc
 import dataclasses
 import shutil
+import site
 from collections.abc import Iterable
 from json import loads, dump
 import logging
@@ -562,13 +563,14 @@ class WorkspaceInstaller:
         artifact_id = product_name
         TranspilerInstaller.install_from_maven(product_name, group_id, artifact_id, artifact)
 
-    def install_switch(self, artifact: Path | None = None):
-        """Install Switch transpiler with workspace deployment."""
-        local_name = "switch"
-        pypi_name = "databricks-switch-plugin"
-
-        # Step 1: Install from PyPI
-        TranspilerInstaller.install_from_pypi(local_name, pypi_name, artifact)
+    def install_switch(self):
+        """Install Switch transpiler with workspace deployment.
+        
+        Note: Switch Python package should be installed as a Lakebridge dependency.
+        This method handles workspace deployment and job creation.
+        """
+        # Step 1: Setup Switch config by copying lsp resources
+        self._setup_switch_config()
 
         # Step 2: Extract previous installation info for cleanup
         previous_job_id, previous_switch_home = self._get_previous_switch_installation()
@@ -580,7 +582,7 @@ class WorkspaceInstaller:
             logger.info("Deploying Switch to workspace...")
             if previous_job_id or previous_switch_home:
                 logger.info(f"Previous installation detected - will clean up job_id={previous_job_id}, switch_home={previous_switch_home}")
-            
+
             switch_installer = SwitchInstaller(self._ws)
             install_result = switch_installer.install(
                 previous_job_id=previous_job_id,
@@ -593,11 +595,35 @@ class WorkspaceInstaller:
             # Step 5: Display installation details to user
             self._display_switch_installation_details(install_result)
 
-        except ImportError:
-            logger.warning("Switch package not available for workspace deployment. PyPI installation completed.")
+        except ImportError as e:
+            logger.error(f"Switch package not found: {e}")
+            logger.error("Please install Switch package first.")
+            raise RuntimeError("Switch package not installed.") from e
         except Exception as e:
             logger.error(f"Failed to deploy Switch to workspace: {e}")
             raise RuntimeError(f"Switch workspace deployment failed: {e}") from e
+
+    def _setup_switch_config(self):
+        """Setup Switch config by copying lsp resources from installed package."""
+        # Find lsp folder in current environment's site-packages
+        lsp_source = None
+        for site_pkg in site.getsitepackages():
+            potential_lsp = Path(site_pkg) / "lsp"
+            if potential_lsp.exists():
+                lsp_source = potential_lsp
+                break
+
+        if not lsp_source:
+            raise ValueError("Installed Switch package is missing a 'lsp' folder")
+
+        # Prepare target directory
+        target_path = TranspilerInstaller.transpilers_path() / "switch" / "lib"
+        target_path.mkdir(parents=True, exist_ok=True)
+
+        # Copy using same logic as WheelInstaller
+        shutil.copytree(lsp_source, target_path, dirs_exist_ok=True)
+
+        logger.info(f"Setup Switch config: {target_path / 'config.yml'}")
 
     def _get_previous_switch_installation(self) -> tuple[int | None, str | None]:
         """Extract previous Switch installation info from config for cleanup.
@@ -695,7 +721,7 @@ class WorkspaceInstaller:
         elif "databricks_bb_plugin" in path.name:
             self.install_bladebridge(path)
         elif "databricks_switch_plugin" in path.name:
-            self.install_switch(path)
+            self.install_switch()
         else:
             logger.fatal(f"Cannot install unsupported artifact: {artifact}")
 
