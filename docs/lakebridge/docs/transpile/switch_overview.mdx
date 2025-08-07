@@ -17,9 +17,10 @@ Switch operates through three key components that distinguish it from rule-based
 
 ### LLM-Powered Semantic Understanding
 Instead of parsing rules, Switch uses [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/) to:
-- Interpret SQL intent and business context beyond syntax
-- Handle proprietary SQL extensions and complex logic patterns
-- Support extensible conversion through custom YAML prompts
+- Interpret code intent and business context beyond syntax
+- Handle SQL dialects, programming languages, and workflow definitions
+- Support complex logic patterns and proprietary extensions
+- Enable extensible conversion through custom YAML prompts
 
 ### Native Databricks Integration
 Switch runs entirely within the Databricks platform:
@@ -32,23 +33,6 @@ Switch runs entirely within the Databricks platform:
 - **Notebooks**: Python notebooks containing Spark SQL (primary output)
 - **Generic Files**: YAML workflows, JSON configurations, and other text formats
 - **Experimental**: Additional SQL notebook output converted from generated Python notebooks
-
----
-
-## Source Format Support
-
-Switch supports multiple source formats with flexible preprocessing:
-
-### SQL Sources (Default)
-- **Preprocessing**: Automatic SQL comment removal and whitespace normalization
-- **Use Cases**: Traditional SQL migration from various dialects
-- **Parameter**: `--source-format sql` (default)
-
-### Generic Sources
-- **Preprocessing**: None - preserves original content
-- **Use Cases**: XML workflows, configuration files, code in other languages
-- **Parameter**: `--source-format generic`
-- **Examples**: Informatica XML to Databricks Jobs YAML, Python scripts to notebooks, Airflow DAGs to Databricks Jobs
 
 ---
 
@@ -67,11 +51,10 @@ Before installing and using Switch, ensure your Databricks environment meets the
 **Data Storage Requirements**
 - **Catalog Access**: Existing catalog for Switch state management tables
   - Unity Catalog catalogs (recommended) or Hive metastore catalogs supported
-  - Default catalog name: `remorph`
 - **Schema Access**: Existing schema within the specified catalog
-  - Default schema name: `transpiler`
 - **Table Creation Permission**: `CREATE TABLE` rights on the catalog and schema
   - Switch creates Delta tables for conversion state and intermediate results
+  - Table naming: `lakebridge_switch_{yyyyMMddHHmm}` (e.g., `lakebridge_switch_202501151430`)
 
 ### Model Serving Access
 
@@ -90,26 +73,48 @@ Switch uses Foundation Model APIs (like Claude) by default, with options for ext
 
 ---
 
-## SQL Dialect Support
+## Source Format Support
 
-Switch provides built-in sample conversion prompts for major SQL dialects, with extensibility for custom dialects through YAML configuration.
+Switch supports multiple source formats and provides built-in conversion prompts for various use cases.
 
-### Built-in Sample Conversion Prompts
+**Usage**: Specify the conversion type using the `--source-dialect` parameter with one of the values listed below.
 
-| SQL Dialect | Source Systems |
-|-------------|----------------|
-| **MySQL** | MySQL, MariaDB, and MySQL-compatible services (including Amazon Aurora MySQL, RDS, Google Cloud SQL) |
-| **Netezza** | IBM Netezza |
-| **Oracle** | Oracle Database, Oracle Exadata, and Oracle-compatible services (including Amazon RDS) |
-| **PostgreSQL** | PostgreSQL and PostgreSQL-compatible services (including Amazon Aurora PostgreSQL, RDS, Google Cloud SQL) |
-| **Redshift** | Amazon Redshift |
-| **Snowflake** | Snowflake |
-| **Teradata** | Teradata |
-| **T-SQL** | Microsoft SQL Server, Azure SQL family (Database, Managed Instance, Synapse Analytics), Amazon RDS for SQL Server |
+### SQL Sources (Default)
 
-### Custom Dialect Support
+Convert SQL from various dialects to Databricks Python notebooks with automatic comment removal and whitespace normalization.
 
-Switch's LLM-based architecture supports additional SQL dialects through custom YAML conversion prompts, making it extensible beyond built-in options.
+#### Built-in SQL Dialect Prompts
+
+| --source-dialect Value | Source Systems | Example Source Systems |
+|--------------|----------------|------------------------|
+| `mysql` | MySQL, MariaDB | Amazon Aurora MySQL, RDS, Google Cloud SQL |
+| `snowflake` | Snowflake | Snowflake data warehouse |
+| `oracle` | Oracle Database | Oracle Database, Exadata, Amazon RDS for Oracle |
+| `postgresql` | PostgreSQL | Amazon Aurora PostgreSQL, RDS, Google Cloud SQL |
+| `redshift` | Amazon Redshift | Amazon Redshift data warehouse |
+| `teradata` | Teradata | Teradata data warehouse |
+| `netezza` | IBM Netezza | IBM Netezza data warehouse appliance |
+| `tsql` | Microsoft SQL Server | Azure SQL Database, Azure Synapse Analytics, Amazon RDS for SQL Server |
+
+### Generic Sources
+
+Convert non-SQL files to notebooks or other formats without preprocessing.
+
+#### Built-in Generic Prompts
+
+| --source-dialect Value | Source → Target |
+|--------------|-----------------|
+| `python` | Python Script → Databricks Python Notebook |
+| `scala` | Scala Code → Databricks Python Notebook |
+| `airflow` | Airflow DAG → Databricks Jobs YAML |
+
+### Latest Built-in Prompts
+
+For the most current and complete list of built-in prompts, see the [databricks-switch-plugin](https://pypi.org/project/databricks-switch-plugin/) package on PyPI, as new conversion types are added regularly.
+
+### Custom Prompt Support
+
+Switch's LLM-based architecture supports additional conversion types through custom YAML conversion prompts, making it extensible beyond built-in options.
 
 For custom prompt creation, see the [Customizable Prompts](#customizable-prompts) section.
 
@@ -145,7 +150,7 @@ databricks labs lakebridge transpile \
   --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
   --input-source /Workspace/path/to/sql \
   --output-folder /Workspace/path/to/notebooks \
-  --builtin-prompt snowflake \
+  --source-dialect snowflake \
   --catalog-name your_existing_catalog \
   --schema-name your_existing_schema \
   --output json
@@ -162,51 +167,7 @@ When executing the above command, the response will look like this:
 }
 ```
 
-### Example: Generic File Conversions
-
-Beyond SQL, Switch supports converting various source formats to different output types:
-
-```bash
-# Example 1: Python scripts to notebooks
-databricks labs lakebridge transpile \
-  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
-  --builtin-prompt python \
-  --source-format generic \
-  --target-type notebook \
-  --input-source "/Workspace/python_scripts" \
-  --output-folder "/Workspace/notebooks" \
-  --catalog-name your_catalog \
-  --schema-name your_schema \
-  --output json
-
-# Example 2: Airflow DAGs to Databricks Jobs YAML
-databricks labs lakebridge transpile \
-  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
-  --builtin-prompt airflow \
-  --source-format generic \
-  --target-type file \
-  --output-extension .yml \
-  --input-source "/Workspace/airflow_dags" \
-  --output-folder "/Workspace/databricks_jobs" \
-  --catalog-name your_catalog \
-  --schema-name your_schema \
-  --output json
-
-# Example 3: SQL to YAML workflows
-databricks labs lakebridge transpile \
-  --transpiler-config-path ~/.databricks/labs/remorph-transpilers/switch/lib/config.yml \
-  --builtin-prompt snowflake \
-  --source-format sql \
-  --target-type file \
-  --output-extension .yml \
-  --input-source "/Workspace/sql/procedures" \
-  --output-folder "/Workspace/workflows" \
-  --catalog-name your_catalog \
-  --schema-name your_schema \
-  --output json
-```
-
-For advanced configuration options, see the [Advanced Configuration](#advanced-configuration) section below.
+For advanced configuration and conversion options (non-SQL sources, file outputs, etc.), see the [Advanced Configuration](#advanced-configuration) section below.
 
 #### Operational Notes
 
@@ -223,15 +184,12 @@ Switch operates differently from other Lakebridge transpilers:
 - `--transpiler-config-path` - Local path to Switch configuration file (identifies Switch as the transpiler)
 - `--input-source` - Databricks workspace path(s) containing files to convert (see Input Source Patterns below)
 - `--output-folder` - Databricks workspace path for generated outputs
-- `--builtin-prompt` - Built-in conversion prompt to use. Options include SQL dialects (`mysql`, `snowflake`, `oracle`, `postgresql`, `redshift`, `teradata`, `netezza`, `tsql`), code conversions (`python`, `scala`), and workflow conversions (`airflow`)
+- `--source-dialect` - Conversion type to use. Choose from:
+  - **SQL Dialects**: `mysql`, `snowflake`, `oracle`, `postgresql`, `redshift`, `teradata`, `netezza`, `tsql`
+  - **Generic sources**: `python`, `scala`, `airflow`
 - `--catalog-name` - Databricks catalog for state tables. Must already exist.
 - `--schema-name` - Databricks schema for state tables. Must already exist.
   - Note: The user must have `CREATE TABLE` permissions on the specified catalog and schema for Switch's state management and intermediate result tables.
-
-#### Optional Parameters
-- `--source-format` - Source file format type. Choose from: `sql`, `generic` (default: `sql`)
-- `--target-type` - Output format type. Choose from: `notebook`, `file` (default: `notebook`)
-- `--output-extension` - File extension when using `--target-type file` (e.g., `.yml`, `.json`)
 
 #### Input Source Patterns
 
@@ -246,7 +204,7 @@ The `--input-source` parameter supports flexible path specifications:
 
 ### Advanced Configuration
 
-Switch provides detailed configuration options that can be set during installation or by editing the `config.yml` file directly:
+Switch provides detailed configuration options that can be set by editing the `config.yml` file:
 
 | Parameter | Description | Default Value | Available Options |
 |-----------|-------------|---------------|-------------------|
@@ -256,14 +214,26 @@ Switch provides detailed configuration options that can be set during installati
 | `comment_lang` | Language for generated comments | `English` | `English`, `Japanese`, `Chinese`, `French`, `German`, `Italian`, `Korean`, `Portuguese`, `Spanish` |
 | `max_fix_attempts` | Maximum syntax error fix attempts | `1` | Any positive integer |
 | `log_level` | Logging verbosity level | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `source_format` | Source file format type. `sql` performs SQL comment removal and whitespace compression preprocessing. `generic` processes files as-is without preprocessing. | `sql` | `sql`, `generic` |
+| `target_type` | Output format type | `notebook` | `notebook`, `file` |
+| `output_extension` | File extension for file output | `<none>` | Any extension (e.g., `.yml`, `.json`, `.xml`) |
 | `conversion_prompt_yaml` | Custom conversion prompt YAML file path. When specified, this custom prompt is used instead of the built-in prompt for the selected `--source-dialect` | `<none>` | Full workspace path to YAML file |
-| `existing_result_table` | Existing result table to reuse | `<none>` | Full table name (`catalog.schema.table`) |
+| `request_params` | Additional request parameters for model serving endpoint (JSON format) | `<none>` | JSON string (e.g., `{"max_tokens": 64000}`) |
 | `sql_output_dir` | (Experimental) Directory for SQL notebooks | `<none>` | Full workspace path |
 | `wait_for_completion` | Wait for job completion. `true`=waits until job finishes, `false`=returns immediately with job URL | `false` | `true`, `false` |
 
-**Configuration Methods**:
-1. **During Installation**: Configure options when running `databricks labs lakebridge install-transpile`
-2. **Direct File Edit**: Modify the `config.yml` file at the installation path and then execute `databricks labs lakebridge transpile`
+**Configuration Method**:
+Modify `default:` values in the `config.yml` file and then execute `databricks labs lakebridge transpile`
+
+**Example config.yml modification**:
+```yaml
+- flag: comment_lang
+  default: "Japanese"     # Change from default "English" to "Japanese"
+```
+
+**Configuration for specific use cases**:
+- **Python script → Databricks Python notebook**: Set `source_format: "generic"`
+- **Airflow → Databricks Jobs YAML**: Set `source_format: "generic"`, `target_type: "file"`, `output_extension: ".yml"`
 
 ---
 
@@ -272,8 +242,8 @@ Switch provides detailed configuration options that can be set during installati
 ### When to Use Switch
 
 Switch's LLM-based approach makes it particularly suitable for:
-- **Complex stored procedures and ETL logic** where understanding business intent is crucial
-- **SQL dialects not yet covered by other transpilers** — Switch allows you to add support through custom YAML prompts
+- **Complex code and workflow conversions** where understanding business intent and context is crucial
+- **Source formats not yet covered by other transpilers** — Switch allows you to add support through custom YAML prompts
 
 ### When to Use Other Transpilers
 
@@ -368,18 +338,18 @@ When Switch executes as a Databricks Job, CLI parameters are mapped to notebook 
 
 | CLI Parameter | Notebook Parameter | Description |
 |---------------|-------------------|-------------|
-| `--input-source` | `input_dir` | Path(s) containing SQL files (supports patterns) |
-| `--output-folder` | `output_dir` | Directory for generated notebooks |
+| `--input-source` | `input_dir` | Path(s) containing files to convert (supports patterns) |
+| `--output-folder` | `output_dir` | Directory for generated outputs |
 | `--catalog-name` | `result_catalog` | Catalog for tracking tables |
 | `--schema-name` | `result_schema` | Schema for tracking tables |
-| `--source-dialect` | `sql_dialect` | Input SQL dialect |
+| `--source-dialect` | `builtin_prompt` | Built-in conversion prompt (mapped internally) |
 | `--transpiler-config-path` | (config file) | Loads additional parameters from Switch config |
 
 Additional parameters are configured through the Switch config file (see the [Advanced Configuration](#advanced-configuration) section above).
 
 ### State Management
 
-Switch uses a Delta table to track conversion progress and results. Each conversion job creates a timestamped table: `{catalog}.{schema}.lakebridge_switch_{YYYYMMDDHHmm}`
+Switch uses a Delta table to track conversion progress and results. Each conversion job creates a timestamped table: `{catalog}.{schema}.lakebridge_switch_{yyyyMMddHHmm}` (e.g., `main.default.lakebridge_switch_202501151430`)
 
 The table stores input file information (path, content, token counts), conversion results (generated notebooks, token usage, processing time), error details when conversions fail, and syntax check results from validation stages. This allows you to monitor which files were processed successfully and investigate any issues that occurred during conversion.
 
@@ -413,6 +383,10 @@ Switch creates Delta tables with the following complete schema:
 | `result_python_parse_error` | string | Python syntax errors found using ast.parse |
 | `result_extracted_sqls` | array<string> | SQL statements extracted from Python code (initially null) |
 | `result_sql_parse_errors` | array<string> | SQL syntax errors found using EXPLAIN (initially null) |
+| `source_format` | string | Source format type (sql or generic) |
+| `target_type` | string | Output type (notebook or file) |
+| `output_extension` | string | File extension for file outputs |
+| `builtin_prompt` | string | Built-in prompt used for conversion |
 
 ### Model Requirements
 
