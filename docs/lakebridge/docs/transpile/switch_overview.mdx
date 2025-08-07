@@ -270,67 +270,81 @@ When you run Switch via the CLI, it executes as Databricks Jobs using a sophisti
 
 ### Processing Architecture
 
-Switch executes as a Databricks Job that runs the main orchestration notebook (`00_main`), which coordinates a 6-stage conversion pipeline:
+Switch executes as a Databricks Job that runs the main orchestration notebook (`00_main`), which routes to specialized orchestrators that coordinate the conversion pipeline:
 
 #### Main Orchestration
 The **`00_main`** notebook serves as the entry point when Switch is executed via Databricks Jobs API. It:
 - Validates all input parameters from the job configuration
-- Executes each processing stage in sequence using `dbutils.notebook.run()`
-- Tracks overall progress and handles stage-level failures
-- Displays final conversion results and status in the job output
+- Routes execution to the appropriate orchestrator based on `target_type` (notebook or file output)
+- Handles orchestrator results and displays final conversion summary
+- Provides unified entry point for both notebook and file conversion workflows
 
 #### Conversion Flow
 
 ```mermaid
 flowchart TD
-    input[Input SQL Files] -->|Input| analyze[[01_analyze_input_files]]
-    analyze <-->|Read & Write| conversionTable[Conversion Result Table]
-
-    conversionTable <-->|Read & Write| convert[[02_convert_sql_to_databricks]]
-    convert -.->|Use| endpoint[Model Serving Endpoint]
-    convert -.->|Refer| prompts["Conversion Prompt YAML<br/>(SQL Dialect Specific)"]
-
-    conversionTable <-->|Read & Write| validate[[03_01_static_syntax_check]]
-
-    conversionTable <-->|Read & Write| fixErrors[[03_02_fix_syntax_error]]
-    fixErrors -.->|Use| endpoint
-
-    conversionTable <-->|Read & Write| splitCells[[04_split_cells]]
-
-    conversionTable -->|Input| export[[05_export_to_databricks_notebooks]]
-    export -->|Output| notebooks[Converted Databricks Notebooks]
+    main[00_main] -->|target_type=notebook| orchestrator[orchestrate_to_notebook]
+    
+    orchestrator -->|sequentially calls| processing
+    
+    subgraph processing ["Processing Workflow"]
+        direction TB
+        analyze[analyze_input_files] --> convert[convert_with_llm]
+        convert --> validate[validate_python_notebook]
+        validate --> fix[fix_syntax_with_llm]
+        fix --> split[split_code_into_cells]
+        split --> export[export_to_notebook]
+        export --> sqlExport["convert_notebook_to_sql<br>(Optional)"]
+    end
+    
+    processing <-->|Read & Write| table[Conversion Result Table]
+    
+    convert -.->|Uses| endpoint[Model Serving Endpoint]
+    fix -.->|Uses| endpoint
+    sqlExport -.->|Uses| endpoint
+    
+    export --> notebooks[Python Notebooks]
+    sqlExport -.-> sqlNotebooks["SQL Notebooks<br>(Optional Output)"]
 
     %% Styling
+    classDef entry fill:#FFE6CC,stroke:#333,stroke-width:3px;
+    classDef orchestrator fill:#E6F3FF,stroke:#333,stroke-width:2px;
     classDef process fill:#E6E6FA,stroke:#333,stroke-width:2px;
-    class analyze,convert,validate,fixErrors,splitCells,export process;
     classDef data fill:#E0F0E0,stroke:#333,stroke-width:2px;
-    class input,conversionTable,notebooks data;
     classDef external fill:#FFF0DB,stroke:#333,stroke-width:2px;
-    class endpoint,prompts external;
+    classDef optional fill:#F0F0F0,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5;
+    
+    class main entry;
+    class orchestrator orchestrator;
+    class analyze,convert,validate,fix,split,export process;
+    class sqlExport optional;
+    class table,notebooks data;
+    class sqlNotebooks optional;
+    class endpoint external;
 ```
 
-The conversion pipeline consists of 6 core stages plus 1 optional stage, each implemented as a separate Databricks notebook. The following sections provide detailed explanations of each processing stage shown in the flow above.
+The orchestrator executes each processing notebook sequentially using `dbutils.notebook.run()`. The following sections describe each processing step in the workflow:
 
-##### Stage 1: File Analysis
-The pipeline begins by scanning your input directory for SQL files. It removes SQL comments to get accurate token counts using model-specific tokenizers (Claude uses ~3.4 characters per token, OpenAI uses tiktoken). Files exceeding the `token_count_threshold` are excluded from conversion. All metadata is stored in a timestamped Delta table for tracking.
+#### analyze_input_files
+Scans the input directory for files and performs initial analysis. For SQL sources, it removes comments and normalizes whitespace to get accurate token counts using model-specific tokenizers (Claude uses ~3.4 characters per token, OpenAI uses tiktoken). Files exceeding the `token_count_threshold` are excluded from conversion. All file metadata and analysis results are stored in a timestamped Delta table.
 
-##### Stage 2: SQL Conversion
-The system loads dialect-specific YAML prompts (or your custom prompt) and sends SQL content to the configured model serving endpoint. Multiple files are processed concurrently (default: 4) for efficiency. The LLM transforms SQL code into Python code with `spark.sql()` calls, preserving business logic while adapting to Databricks patterns.
+#### convert_with_llm  
+Loads conversion prompts (built-in or custom YAML) and sends file content to the configured model serving endpoint. Multiple files are processed concurrently (configurable, default: 4) for efficiency. The LLM transforms source code into Python notebooks with `spark.sql()` calls, preserving business logic while adapting to Databricks patterns.
 
-##### Stage 3: Syntax Validation
-Before proceeding, all generated code undergoes rigorous validation. Python syntax is checked using `ast.parse()`, while SQL statements within `spark.sql()` calls are validated using Spark's `EXPLAIN` command. Any errors are recorded in the result table without modifying the code.
+#### validate_python_notebook
+Performs syntax validation on the generated code. Python syntax is checked using `ast.parse()`, while SQL statements within `spark.sql()` calls are validated using Spark's `EXPLAIN` command. Any errors are recorded in the result table for potential fixing in the next step.
 
-##### Stage 4: Error Correction
-If syntax errors are detected, this stage attempts automatic fixes. It sends the error context back to the LLM, which suggests corrections. The process repeats up to `max_fix_attempts` times (default: 1). This stage only runs when errors exist from the previous validation.
+#### fix_syntax_with_llm
+Attempts automatic error correction when syntax issues are detected. Sends error context back to the model serving endpoint, which suggests corrections. The validation and fix process repeats up to `max_fix_attempts` times (default: 1) until errors are resolved or the retry limit is reached.
 
-##### Stage 5: Cell Organization
-Raw converted code is transformed into a well-structured notebook. The system analyzes code flow and dependencies, splitting at logical boundaries like imports, function definitions, and major SQL operations. Markdown cells are added for documentation and readability.
+#### split_code_into_cells
+Transforms raw converted code into well-structured notebook cells. Analyzes code flow and dependencies, splitting content at logical boundaries like imports, function definitions, and major operations. Adds appropriate markdown cells for documentation and readability.
 
-##### Stage 6: Notebook Export
-The final stage creates Databricks-compatible `.py` notebooks in your output directory. Each notebook includes metadata, source file references, and any syntax check results as comments. The system handles files up to 10MB and preserves your directory structure.
+#### export_to_notebook
+Creates Databricks-compatible `.py` notebooks in the specified output directory. Each notebook includes proper metadata, source file references, and any syntax check results as comments. Handles large files (up to 10MB) and preserves the original directory structure.
 
-##### Stage 7: SQL Notebook Conversion (Optional)
-When `sql_output_dir` is specified, this experimental stage uses the model serving endpoint to convert Python notebooks into SQL notebook format with Databricks SQL syntax. This is useful for teams preferring SQL-only workflows, though some Python logic may be lost in translation.
+#### convert_notebook_to_sql (Optional)
+When `sql_output_dir` is specified, this optional step uses the model serving endpoint to convert Python notebooks into SQL notebook format with Databricks SQL syntax. Useful for teams preferring SQL-only workflows, though some Python logic may be lost in the conversion process.
 
 ### Parameter Mapping
 
@@ -338,12 +352,12 @@ When Switch executes as a Databricks Job, CLI parameters are mapped to notebook 
 
 | CLI Parameter | Notebook Parameter | Description |
 |---------------|-------------------|-------------|
-| `--input-source` | `input_dir` | Path(s) containing files to convert (supports patterns) |
-| `--output-folder` | `output_dir` | Directory for generated outputs |
-| `--catalog-name` | `result_catalog` | Catalog for tracking tables |
-| `--schema-name` | `result_schema` | Schema for tracking tables |
-| `--source-dialect` | `builtin_prompt` | Built-in conversion prompt (mapped internally) |
-| `--transpiler-config-path` | (config file) | Loads additional parameters from Switch config |
+| `--input-source` | `input_dir` | Workspace path(s) containing files to convert (supports patterns) |
+| `--output-folder` | `output_dir` | Workspace directory for generated outputs |
+| `--catalog-name` | `result_catalog` | Databricks catalog for state tracking tables |
+| `--schema-name` | `result_schema` | Databricks schema for state tracking tables |
+| `--source-dialect` | `builtin_prompt` | Conversion type (mapped to built-in prompt internally) |
+| `--transpiler-config-path` | (config file) | Path to Switch config file (loads additional parameters) |
 
 Additional parameters are configured through the Switch config file (see the [Advanced Configuration](#advanced-configuration) section above).
 
