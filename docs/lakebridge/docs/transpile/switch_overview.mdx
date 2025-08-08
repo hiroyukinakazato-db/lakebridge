@@ -54,7 +54,7 @@ Before installing and using Switch, ensure your Databricks environment meets the
 - **Schema Access**: Existing schema within the specified catalog
 - **Table Creation Permission**: `CREATE TABLE` rights on the catalog and schema
   - Switch creates Delta tables for conversion state and intermediate results
-  - Table naming: `lakebridge_switch_{yyyyMMddHHmm}` (e.g., `lakebridge_switch_202501151430`)
+  - Table naming: `lakebridge_switch_{timestamp}_{random}` (e.g., `lakebridge_switch_20250115143022_7ka9`)
 
 ### Model Serving Access
 
@@ -427,7 +427,7 @@ Additional parameters are configured through the Switch config file (see the [Ad
 
 ### State Management
 
-Switch uses a Delta table to track conversion progress and results. Each conversion job creates a timestamped table: `{catalog}.{schema}.lakebridge_switch_{yyyyMMddHHmm}` (e.g., `main.default.lakebridge_switch_202501151430`)
+Switch uses a Delta table to track conversion progress and results. Each conversion job creates a timestamped table: `{catalog}.{schema}.lakebridge_switch_{timestamp}_{random}` (e.g., `main.default.lakebridge_switch_20250115143022_7ka9`)
 
 The table stores input file information (path, content, token counts), conversion results (generated notebooks, token usage, processing time), error details when conversions fail, and syntax check results from validation stages. This allows you to monitor which files were processed successfully and investigate any issues that occurred during conversion.
 
