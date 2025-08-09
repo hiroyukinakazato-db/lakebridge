@@ -46,7 +46,7 @@ from databricks.labs.lakebridge.contexts.application import ApplicationContext
 from databricks.labs.lakebridge.install import TranspilerInstaller, WorkspaceInstaller
 from switch.api.installer import SwitchInstaller
 from switch.notebooks.pyscripts.types.builtin_prompt import BuiltinPrompt
-from switch.testing.e2e_utils import SwitchCleanupManager, SwitchExamplesManager
+from switch.testing.e2e_utils import SwitchCleanupManager, SwitchExamplesManager, SwitchSchemaManager
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +62,21 @@ except ImportError:
 class LakebridgeTestConfig:
     """Unified configuration for Lakebridge E2E tests"""
     catalog: str = "main"
-    schema: str = "default"
     include_sync: bool = False
     clean_all_before: bool = False
     keep_after: bool = False
+    warehouse_id: Optional[str] = None
+    test_schema: Optional[str] = None  # Generated unique schema for test isolation
 
     @classmethod
     def from_env(cls) -> 'LakebridgeTestConfig':
         """Create configuration from environment variables"""
         return cls(
             catalog=os.getenv("LAKEBRIDGE_SWITCH_E2E_CATALOG", "main"),
-            schema=os.getenv("LAKEBRIDGE_SWITCH_E2E_SCHEMA", "default"),
             include_sync=os.getenv("LAKEBRIDGE_SWITCH_E2E_INCLUDE_SYNC") == "true",
             clean_all_before=os.getenv("LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE") == "true",
-            keep_after=os.getenv("LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER") == "true"
+            keep_after=os.getenv("LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER") == "true",
+            warehouse_id=os.getenv("LAKEBRIDGE_SWITCH_E2E_WAREHOUSE_ID")
         )
 
 
@@ -84,6 +85,7 @@ BASE_DIR_PREFIX = ".lakebridge-switch-e2e"
 EXAMPLES_DIR_SUFFIX = "-examples"
 TRANSPILERS_PATH = ".databricks/labs/remorph-transpilers"
 SWITCH_SUBDIR = "switch"
+SCHEMA_PREFIX = "e2e_lakebridge_switch"  # Schema prefix for unique test schema generation
 
 
 @pytest.mark.e2e
@@ -225,6 +227,7 @@ class TestLakebridgeSwitchConversion:
     workspace_client = None
     cleanup_manager = None
     examples_manager = None
+    schema_manager = None
     job_id = None
     examples_base_dir = None
     config = None
@@ -244,14 +247,29 @@ class TestLakebridgeSwitchConversion:
         
         cls.workspace_client = WorkspaceClient(host=host, token=token)
         
+        # Validate warehouse_id upfront (required for schema operations)
+        if not cls.config.warehouse_id:
+            pytest.skip("LAKEBRIDGE_SWITCH_E2E_WAREHOUSE_ID required for schema operations")
+        
+        # Initialize schema manager and generate unique test schema
+        cls.schema_manager = SwitchSchemaManager(cls.workspace_client, cls.config.warehouse_id)
+        test_schema = cls.schema_manager.generate_unique_schema_name(SCHEMA_PREFIX)
+        
+        # Create test schema
+        logger.info(f"Creating test schema: {cls.config.catalog}.{test_schema}")
+        cls.schema_manager.create_schema(cls.config.catalog, test_schema)
+        cls.config.test_schema = test_schema
+        
         # Initialize utilities
-        warehouse_id = os.getenv("LAKEBRIDGE_SWITCH_E2E_WAREHOUSE_ID")
-        cls.cleanup_manager = SwitchCleanupManager(cls.workspace_client, warehouse_id) if warehouse_id else None
+        cls.cleanup_manager = SwitchCleanupManager(cls.workspace_client, cls.config.warehouse_id)
         cls.examples_manager = SwitchExamplesManager(cls.workspace_client)
         
         # Cleanup before test if requested
-        if cls.config.clean_all_before and cls.cleanup_manager:
-            cls.cleanup_manager.cleanup_switch_jobs()
+        if cls.config.clean_all_before:
+            try:
+                cls.cleanup_manager.cleanup_all_if_requested(cls.config.catalog, clean_before=True)
+            except Exception as e:
+                logger.warning(f"Pre-setup cleanup failed: {e}")
         
         # Install Switch once
         logger.info("Setting up Switch for all conversion tests")
@@ -275,14 +293,37 @@ class TestLakebridgeSwitchConversion:
         if not cls.config.keep_after:
             logger.info("Cleaning up after all conversion tests")
             
-            # Cleanup Switch jobs
+            # Comprehensive cleanup including potential tables
             if cls.cleanup_manager:
-                cls.cleanup_manager.cleanup_switch_jobs()
+                try:
+                    cls.cleanup_manager.cleanup_all_if_requested(cls.config.catalog, clean_before=False)
+                except Exception as e:
+                    logger.warning(f"Comprehensive cleanup failed: {e}")
+                    # Fallback to basic job cleanup
+                    try:
+                        cls.cleanup_manager.cleanup_switch_jobs()
+                    except Exception:
+                        pass
             
-            # Additional cleanup if needed
+            # Drop test schema (removes all tables/views)
+            if cls.schema_manager and cls.config.test_schema:
+                try:
+                    logger.info(f"Dropping test schema: {cls.config.catalog}.{cls.config.test_schema}")
+                    cls.schema_manager.drop_schema(cls.config.catalog, cls.config.test_schema)
+                except Exception as e:
+                    logger.warning(f"Failed to drop test schema: {e}")
+            
+            # Manual job cleanup if needed
             if cls.job_id and cls.workspace_client:
                 try:
                     cls.workspace_client.jobs.delete(cls.job_id)
+                except Exception:
+                    pass
+            
+            # Clean up test directories
+            if cls.examples_base_dir and cls.workspace_client:
+                try:
+                    cls.workspace_client.workspace.delete(cls.examples_base_dir, recursive=True)
                 except Exception:
                     pass
 
@@ -344,7 +385,7 @@ class TestLakebridgeSwitchConversion:
                 input_source=input_dir,
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
-                schema_name=self.config.schema,
+                schema_name=self.config.test_schema,
                 wait_for_completion=self.config.include_sync,
                 job_id=self.job_id
             )
@@ -374,7 +415,7 @@ class TestLakebridgeSwitchConversion:
                 input_source=input_dir,
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
-                schema_name=self.config.schema,
+                schema_name=self.config.test_schema,
                 wait_for_completion=self.config.include_sync,
                 job_id=self.job_id,
                 extra_options={
@@ -410,7 +451,7 @@ class TestLakebridgeSwitchConversion:
                 input_source=input_dir,
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
-                schema_name=self.config.schema,
+                schema_name=self.config.test_schema,
                 wait_for_completion=self.config.include_sync,
                 job_id=self.job_id,
                 extra_options={
