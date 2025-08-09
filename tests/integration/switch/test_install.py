@@ -27,6 +27,7 @@ import pytest
 import yaml
 
 from databricks.labs.lakebridge.install import WorkspaceInstaller
+from .fixtures import switch_config_data, mock_install_result, mock_workspace_client
 
 
 logger = logging.getLogger(__name__)
@@ -57,33 +58,35 @@ class TestSwitchInstallationProcess:
             with config_path.open("w") as f:
                 yaml.dump(switch_config_data, f)
 
-            # Mock SwitchInstaller to return job information
-            with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
-                mock_installer = MagicMock()
-                mock_installer.install.return_value = mock_install_result
-                mock_switch_installer_class.return_value = mock_installer
+            # Mock read_switch_config to return the prepared config data
+            with patch('databricks.labs.lakebridge.install.TranspilerInstaller.read_switch_config', return_value=switch_config_data):
+                # Mock SwitchInstaller to return job information
+                with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
+                    mock_installer = MagicMock()
+                    mock_installer.install.return_value = mock_install_result
+                    mock_switch_installer_class.return_value = mock_installer
 
-                # Create WorkspaceInstaller with minimal dependencies
-                installer = WorkspaceInstaller(
-                    ws=mock_workspace_client,
-                    prompts=None, installation=None, install_state=None,
-                    product_info=None, resource_configurator=None, workspace_installation=None
-                )
+                    # Create WorkspaceInstaller with minimal dependencies
+                    installer = WorkspaceInstaller(
+                        ws=mock_workspace_client,
+                        prompts=None, installation=None, install_state=None,
+                        product_info=None, resource_configurator=None, workspace_installation=None
+                    )
 
-                # Mock the display method to avoid stdout during tests
-                with patch.object(installer, '_display_switch_installation_details') as mock_display:
-                    # Execute workspace deployment
-                    installer.install_switch()
+                    # Mock the display method to avoid stdout during tests
+                    with patch.object(installer, '_display_switch_installation_details') as mock_display:
+                        # Execute workspace deployment
+                        installer.install_switch()
 
-                    # Verify display method was called with install result
-                    mock_display.assert_called_once_with(mock_install_result)
+                        # Verify display method was called with install result
+                        mock_display.assert_called_once_with(mock_install_result)
 
-                # Verify SwitchInstaller was called correctly
-                mock_switch_installer_class.assert_called_once_with(mock_workspace_client)
-                mock_installer.install.assert_called_once_with(
-                    previous_job_id=12345,
-                    previous_switch_home="/Workspace/Users/test/.lakebridge-switch"
-                )
+                    # Verify SwitchInstaller was called correctly
+                    mock_switch_installer_class.assert_called_once_with(mock_workspace_client)
+                    mock_installer.install.assert_called_once_with(
+                        previous_job_id=12345,
+                        previous_switch_home="/Workspace/Users/test/.lakebridge-switch"
+                    )
 
                 logger.info(f"Workspace deployment completed. Job ID: {mock_install_result.job_id}")
 
@@ -151,44 +154,46 @@ class TestSwitchInstallationProcess:
             with config_path.open("w") as f:
                 yaml.dump(previous_config_data, f)
 
-            # Mock workspace deployment
-            with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
-                mock_installer = MagicMock()
-                mock_installer.install.return_value = mock_install_result
-                mock_switch_installer_class.return_value = mock_installer
+            # Mock read_switch_config to return the previous config data
+            with patch('databricks.labs.lakebridge.install.TranspilerInstaller.read_switch_config', return_value=previous_config_data):
+                # Mock workspace deployment
+                with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
+                    mock_installer = MagicMock()
+                    mock_installer.install.return_value = mock_install_result
+                    mock_switch_installer_class.return_value = mock_installer
 
-                # Create WorkspaceInstaller
-                installer = WorkspaceInstaller(
-                    ws=mock_workspace_client,
-                    prompts=None, installation=None, install_state=None,
-                    product_info=None, resource_configurator=None, workspace_installation=None
-                )
+                    # Create WorkspaceInstaller
+                    installer = WorkspaceInstaller(
+                        ws=mock_workspace_client,
+                        prompts=None, installation=None, install_state=None,
+                        product_info=None, resource_configurator=None, workspace_installation=None
+                    )
 
-                # Mock the display method to avoid stdout during tests
-                with patch.object(installer, '_display_switch_installation_details') as mock_display:
-                    # Execute installation - should detect and pass previous installation info
-                    installer.install_switch()
+                    # Mock the display method to avoid stdout during tests
+                    with patch.object(installer, '_display_switch_installation_details') as mock_display:
+                        # Execute installation - should detect and pass previous installation info
+                        installer.install_switch()
 
-                    # Verify display method was called
-                    mock_display.assert_called_once_with(mock_install_result)
+                        # Verify display method was called
+                        mock_display.assert_called_once_with(mock_install_result)
 
-                # Verify SwitchInstaller.install was called with previous installation info
-                mock_installer.install.assert_called_once_with(
-                    previous_job_id=999888777,
-                    previous_switch_home="/Workspace/Users/test/.lakebridge-switch-old"
-                )
+                    # Verify SwitchInstaller.install was called with previous installation info
+                    mock_installer.install.assert_called_once_with(
+                        previous_job_id=999888777,
+                        previous_switch_home="/Workspace/Users/test/.lakebridge-switch-old"
+                    )
 
-                # Verify config was updated with new job info
-                with config_path.open('r') as f:
-                    updated_config = yaml.safe_load(f)
+                    # Verify config was updated with new job info
+                    with config_path.open('r') as f:
+                        updated_config = yaml.safe_load(f)
 
-                assert updated_config['custom']['job_id'] == mock_install_result.job_id
-                assert updated_config['custom']['job_name'] == mock_install_result.job_name
-                assert updated_config['custom']['job_url'] == mock_install_result.job_url
-                assert updated_config['custom']['switch_home'] == mock_install_result.switch_home
-                assert updated_config['custom']['created_by'] == mock_install_result.created_by
+                    assert updated_config['custom']['job_id'] == mock_install_result.job_id
+                    assert updated_config['custom']['job_name'] == mock_install_result.job_name
+                    assert updated_config['custom']['job_url'] == mock_install_result.job_url
+                    assert updated_config['custom']['switch_home'] == mock_install_result.switch_home
+                    assert updated_config['custom']['created_by'] == mock_install_result.created_by
 
-                logger.info(f"Previous installation (job_id=999888777) cleaned up and new installation completed (job_id={mock_install_result.job_id})")
+                    logger.info(f"Previous installation (job_id=999888777) cleaned up and new installation completed (job_id={mock_install_result.job_id})")
 
     def test_installation_error_handling(self, tmp_path, switch_config_data, mock_workspace_client, caplog):
         """Test error handling during installation process"""
@@ -208,14 +213,16 @@ class TestSwitchInstallationProcess:
                 product_info=None, resource_configurator=None, workspace_installation=None
             )
 
-            # Test SwitchInstaller import error (implementation: output warning and continue normally)
+            # Test SwitchInstaller import error (implementation: log error and raise RuntimeError)
             with patch('switch.api.installer.SwitchInstaller', side_effect=ImportError("Switch package not available")):
-                with caplog.at_level(logging.WARNING):
-                    installer.install_switch()  # should complete normally
-                    
-                # verify warning message is logged
-                assert "Switch package not available for workspace deployment" in caplog.text
-                logger.info("ImportError handling verified: warning logged, no exception raised")
+                with caplog.at_level(logging.ERROR):
+                    with pytest.raises(RuntimeError, match="Switch package not installed"):
+                        installer.install_switch()  # should raise RuntimeError
+                        
+                # verify error messages are logged
+                assert "Switch package not found" in caplog.text
+                assert "Please install Switch package first" in caplog.text
+                logger.info("ImportError handling verified: error logged and RuntimeError raised")
 
             # Test SwitchInstaller.install() failure (implementation: re-raise as RuntimeError)
             with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:

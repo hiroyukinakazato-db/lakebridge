@@ -16,18 +16,19 @@ Environment Variables:
 - DATABRICKS_HOST & DATABRICKS_TOKEN: Workspace credentials (required)
 - LAKEBRIDGE_SWITCH_E2E=true: Enable E2E tests (disabled by default)
 - LAKEBRIDGE_SWITCH_E2E_WAIT_FOR_COMPLETION=true: Wait for job completion (sync execution)
-- LAKEBRIDGE_SWITCH_E2E_CATALOG: Custom catalog name (default: "main")
-- LAKEBRIDGE_SWITCH_E2E_SCHEMA: Custom schema name (default: "default")
 - LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE=true: Clean up existing resources before tests
 - LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER=true: Keep resources after tests (for debugging)
+- LAKEBRIDGE_SWITCH_E2E_CATALOG: Custom catalog name (default: "main")
 - LAKEBRIDGE_SWITCH_E2E_WAREHOUSE_ID: SQL warehouse ID for schema operations (required)
+
+Note: Schema names are automatically generated with timestamp + random suffix to prevent conflicts.
 
 Usage:
     # Quick async test (4 tests, ~2-3 minutes)
-    LAKEBRIDGE_SWITCH_E2E=true pytest tests/integration/switch/e2e/test_e2e_simplified.py -v
+    LAKEBRIDGE_SWITCH_E2E=true pytest tests/integration/switch/test_e2e.py -v
 
     # Full sync test (wait for completion, ~15-20 minutes)  
-    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_WAIT_FOR_COMPLETION=true pytest tests/integration/switch/e2e/test_e2e_simplified.py -v
+    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_WAIT_FOR_COMPLETION=true pytest tests/integration/switch/test_e2e.py -v
 """
 import logging
 import os

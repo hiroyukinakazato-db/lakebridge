@@ -31,6 +31,7 @@ import pytest
 from databricks.labs.lakebridge import cli
 from databricks.labs.lakebridge.config import TranspileConfig
 from databricks.labs.lakebridge.install import TranspilerInstaller
+from .fixtures import switch_config_path, switch_config_data, mock_application_context
 
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,6 @@ class TestSwitchCLIIntegration:
 
         except ImportError:
             pytest.skip("Switch package not available for parameter test")
-
 
     def test_switch_error_handling(self, mock_application_context):
         """Test CLI error handling for Switch integration issues"""
