@@ -15,7 +15,6 @@ Test Classes:
 Environment Variables:
 - DATABRICKS_HOST & DATABRICKS_TOKEN: Workspace credentials (required)
 - LAKEBRIDGE_SWITCH_E2E=true: Enable E2E tests (disabled by default)
-- LAKEBRIDGE_SWITCH_E2E_WAIT_FOR_COMPLETION=true: Wait for job completion (sync execution)
 - LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE=true: Clean up existing resources before tests
 - LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER=true: Keep resources after tests (for debugging)
 - LAKEBRIDGE_SWITCH_E2E_CATALOG: Custom catalog name (default: "main")
@@ -26,9 +25,6 @@ Note: Schema names are automatically generated with timestamp + random suffix to
 Usage:
     # Quick async test (4 tests, ~2-3 minutes)
     LAKEBRIDGE_SWITCH_E2E=true pytest tests/integration/switch/test_e2e.py -v
-
-    # Full sync test (wait for completion, ~15-20 minutes)  
-    LAKEBRIDGE_SWITCH_E2E=true LAKEBRIDGE_SWITCH_E2E_WAIT_FOR_COMPLETION=true pytest tests/integration/switch/test_e2e.py -v
 """
 import logging
 import os
@@ -63,7 +59,6 @@ except ImportError:
 class LakebridgeTestConfig:
     """Unified configuration for Lakebridge E2E tests"""
     catalog: str = "main"
-    wait_for_completion: bool = False
     clean_all_before: bool = False
     keep_after: bool = False
     warehouse_id: Optional[str] = None
@@ -74,7 +69,6 @@ class LakebridgeTestConfig:
         """Create configuration from environment variables"""
         return cls(
             catalog=os.getenv("LAKEBRIDGE_SWITCH_E2E_CATALOG", "main"),
-            wait_for_completion=os.getenv("LAKEBRIDGE_SWITCH_E2E_WAIT_FOR_COMPLETION") == "true",
             clean_all_before=os.getenv("LAKEBRIDGE_SWITCH_E2E_CLEAN_ALL_BEFORE") == "true",
             keep_after=os.getenv("LAKEBRIDGE_SWITCH_E2E_KEEP_AFTER") == "true",
             warehouse_id=os.getenv("LAKEBRIDGE_SWITCH_E2E_WAREHOUSE_ID")
@@ -205,7 +199,8 @@ class TestLakebridgeSwitchConversion:
         """Setup orchestrator following conftest.py pattern"""
         if not cls._setup_environment_and_config():
             return
-        cls._cleanup_old_resources()
+        if cls.config.clean_all_before:
+            cls._cleanup_resources()
         cls._setup_resources()
 
     @classmethod
@@ -213,11 +208,10 @@ class TestLakebridgeSwitchConversion:
         """Teardown orchestrator following conftest.py pattern"""
         if not cls.config.keep_after:
             cls._cleanup_resources()
-            cls._finalize_teardown()
 
     @classmethod
     def _setup_environment_and_config(cls) -> bool:
-        """Setup environment, credentials, and validate warehouse_id
+        """Setup environment, credentials, and validate requirements
 
         Returns:
             bool: True if setup successful, False if should skip tests
@@ -225,30 +219,18 @@ class TestLakebridgeSwitchConversion:
         # Get configuration
         cls.config = LakebridgeTestConfig.from_env()
 
-        # Initialize workspace client
+        # Check all requirements at once
         host = os.getenv("DATABRICKS_HOST")
         token = os.getenv("DATABRICKS_TOKEN")
 
         if not (host and token):
             pytest.skip("Databricks credentials required. Set DATABRICKS_HOST and DATABRICKS_TOKEN")
-
-        cls.workspace_client = WorkspaceClient(host=host, token=token)
-        
-        # Validate warehouse_id upfront (required for schema operations)
         if not cls.config.warehouse_id:
             pytest.skip("LAKEBRIDGE_SWITCH_E2E_WAREHOUSE_ID required for schema operations")
 
+        # Initialize workspace client after all validations
+        cls.workspace_client = WorkspaceClient(host=host, token=token)
         return True
-
-    @classmethod
-    def _cleanup_old_resources(cls) -> None:
-        """Clean up old resources before creating new ones"""
-        cls.cleanup_manager = SwitchCleanupManager(cls.workspace_client, cls.config.warehouse_id)
-        if cls.config.clean_all_before:
-            try:
-                cls.cleanup_manager.cleanup_all_if_requested(cls.config.catalog, prefix=SCHEMA_PREFIX)
-            except Exception as e:
-                logger.warning(f"Pre-setup cleanup failed: {e}")
 
     @classmethod
     def _setup_resources(cls) -> None:
@@ -263,66 +245,45 @@ class TestLakebridgeSwitchConversion:
         cls.schema_manager.create_schema(cls.config.catalog, test_schema)
         cls.config.test_schema = test_schema
 
-        # Initialize examples manager
-        cls.examples_manager = SwitchExamplesManager(cls.workspace_client)
-
         # Install Switch once
         logger.info("Setting up Switch for all conversion tests")
         cls.job_id = cls._ensure_switch_installed_class(cls.workspace_client)
 
+        # Build name for examples base directory
+        current_user = cls.workspace_client.current_user.me().user_name
+        cls.examples_base_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}{EXAMPLES_DIR_SUFFIX}"
+
         # Upload examples once
-        if cls.examples_manager:
-            current_user = cls.workspace_client.current_user.me().user_name
-            cls.examples_base_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}{EXAMPLES_DIR_SUFFIX}"
-            logger.info(f"Uploading examples to {cls.examples_base_dir}")
-            cls.examples_manager.upload_examples_to_workspace(
-                base_dir=cls.examples_base_dir,
-                sql_dialects=['snowflake', 'tsql'],
-                code_types=[],
-                include_workflow=True
-            )
+        logger.info(f"Uploading examples to {cls.examples_base_dir}")
+        cls.examples_manager = SwitchExamplesManager(cls.workspace_client)
+        cls.examples_manager.upload_examples_to_workspace(
+            base_dir=cls.examples_base_dir,
+            sql_dialects=['snowflake', 'tsql'],
+            code_types=[],
+            include_workflow=True
+        )
 
     @classmethod
     def _cleanup_resources(cls) -> None:
-        """Cleanup comprehensive resources including schema and jobs"""
-        logger.info("Cleaning up after all conversion tests")
-        
-        # Comprehensive cleanup including potential tables
-        if cls.cleanup_manager:
-            try:
-                cls.cleanup_manager.cleanup_all_if_requested(cls.config.catalog, prefix=SCHEMA_PREFIX)
-            except Exception as e:
-                logger.warning(f"Comprehensive cleanup failed: {e}")
-                # Fallback to basic job cleanup
-                try:
-                    cls.cleanup_manager.cleanup_switch_jobs()
-                except Exception:
-                    pass
+        """Cleanup resources (always runs when called)"""
+        logger.info("Cleaning up resources")
 
-        # Drop test schema (removes all tables/views)
-        if cls.schema_manager and cls.config.test_schema:
-            try:
-                logger.info(f"Dropping test schema: {cls.config.catalog}.{cls.config.test_schema}")
-                cls.schema_manager.drop_schema(cls.config.catalog, cls.config.test_schema)
-            except Exception as e:
-                logger.warning(f"Failed to drop test schema: {e}")
+        # Initialize cleanup manager if needed
+        if not cls.cleanup_manager:
+            cls.cleanup_manager = SwitchCleanupManager(cls.workspace_client, cls.config.warehouse_id)
 
-        # Manual job cleanup if needed
-        if cls.job_id and cls.workspace_client:
-            try:
-                cls.workspace_client.jobs.delete(cls.job_id)
-            except Exception:
-                pass
+        # Comprehensive cleanup (jobs, schemas, tables, etc.)
+        try:
+            cls.cleanup_manager.cleanup_all_if_requested(cls.config.catalog, prefix=SCHEMA_PREFIX)
+        except Exception as e:
+            logger.warning(f"Cleanup failed: {e}")
 
-    @classmethod
-    def _finalize_teardown(cls) -> None:
-        """Final cleanup of directories and remaining resources"""
         # Clean up test directories
         if cls.examples_base_dir and cls.workspace_client:
             try:
                 cls.workspace_client.workspace.delete(cls.examples_base_dir, recursive=True)
             except Exception:
-                pass
+                logger.warning(f"Failed to delete examples directory: {e}")
 
     @classmethod
     def _ensure_switch_installed_class(cls, workspace_client: WorkspaceClient) -> int:
@@ -366,7 +327,7 @@ class TestLakebridgeSwitchConversion:
         return job_id
 
     def test_sql_basic_conversion(self):
-        """Basic SQL conversion: Snowflake → Databricks (async by default, sync if WAIT_FOR_COMPLETION=true)"""
+        """Basic SQL conversion: Snowflake → Databricks (async)"""
         current_user = self.workspace_client.current_user.me().user_name
 
         try:
@@ -383,19 +344,18 @@ class TestLakebridgeSwitchConversion:
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
                 schema_name=self.config.test_schema,
-                wait_for_completion=self.config.wait_for_completion,
                 job_id=self.job_id
             )
 
             # Verify result
-            self._verify_conversion_result(result, self.config.wait_for_completion)
+            self._verify_conversion_result(result)
             logger.info("Basic SQL conversion test completed successfully")
         except Exception as e:
             logger.error(f"Basic SQL conversion test failed: {e}")
             raise
 
     def test_sql_advanced_conversion(self):
-        """Advanced SQL conversion: TSQL → Databricks with advanced parameters (async by default, sync if WAIT_FOR_COMPLETION=true)"""
+        """Advanced SQL conversion: TSQL → Databricks with advanced parameters (async)"""
         current_user = self.workspace_client.current_user.me().user_name
 
         try:
@@ -413,7 +373,6 @@ class TestLakebridgeSwitchConversion:
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
                 schema_name=self.config.test_schema,
-                wait_for_completion=self.config.wait_for_completion,
                 job_id=self.job_id,
                 extra_options={
                     "log_level": "DEBUG",
@@ -425,14 +384,14 @@ class TestLakebridgeSwitchConversion:
             )
 
             # Verify result
-            self._verify_conversion_result(result, self.config.wait_for_completion)
+            self._verify_conversion_result(result)
             logger.info("Advanced SQL conversion test completed successfully")
         except Exception as e:
             logger.error(f"Advanced SQL conversion test failed: {e}")
             raise
 
     def test_airflow_file_conversion(self):
-        """Airflow DAG to YAML file conversion with generic source format (async by default, sync if WAIT_FOR_COMPLETION=true)"""
+        """Airflow DAG to YAML file conversion with generic source format (async)"""
         current_user = self.workspace_client.current_user.me().user_name
 
         try:
@@ -449,7 +408,6 @@ class TestLakebridgeSwitchConversion:
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
                 schema_name=self.config.test_schema,
-                wait_for_completion=self.config.wait_for_completion,
                 job_id=self.job_id,
                 extra_options={
                     "source_format": "generic",
@@ -459,7 +417,7 @@ class TestLakebridgeSwitchConversion:
             )
 
             # Verify result
-            self._verify_conversion_result(result, self.config.wait_for_completion)
+            self._verify_conversion_result(result)
             logger.info("Airflow file conversion test completed successfully")
         except Exception as e:
             logger.error(f"Airflow file conversion test failed: {e}")
@@ -470,17 +428,11 @@ class TestLakebridgeSwitchConversion:
     def _execute_conversion(self, workspace_client: WorkspaceClient, 
                            source_dialect: str, input_source: str, output_folder: str,
                            catalog_name: str, schema_name: str, 
-                           wait_for_completion: bool = False,
                            job_id: Optional[int] = None,
                            extra_options: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
-        """Execute Lakebridge conversion"""
+        """Execute Lakebridge conversion (always async)"""
         # Prepare transpiler options
-        transpiler_options = {}
-        if wait_for_completion:
-            transpiler_options["wait_for_completion"] = "true"
-
-        if extra_options:
-            transpiler_options.update(extra_options)
+        transpiler_options = extra_options if extra_options else {}
 
         # Create TranspileConfig
         transpiler_config_path = str(_get_switch_config_path())
@@ -495,27 +447,20 @@ class TestLakebridgeSwitchConversion:
             transpiler_options=transpiler_options
         )
 
-        # Execute via Lakebridge CLI
+        # Execute via Lakebridge CLI (always async)
         ctx = ApplicationContext(workspace_client)
         return cli._execute_switch_directly(ctx, transpile_config)
 
-    def _verify_conversion_result(self, result: List[Dict[str, Any]], is_sync: bool):
-        """Verify conversion result"""
+    def _verify_conversion_result(self, result: List[Dict[str, Any]]):
+        """Verify conversion result (async only)"""
         assert isinstance(result, list), "Result should be a list"
         assert len(result) == 1, "Result should contain exactly one item"
 
         result_item = result[0]
         assert result_item["transpiler"] == "switch", "Transpiler should be 'switch'"
         assert "job_id" in result_item, "Result should contain job_id"
-
-        if is_sync:
-            assert "state" in result_item, "Sync result should contain state"
-            assert result_item["state"] in ["TERMINATED", "SKIPPED"], f"Invalid state: {result_item['state']}"
-            logger.info(f"Sync execution verified: state={result_item['state']}")
-        else:
-            assert "run_id" in result_item, "Async result should contain run_id"
-            assert "run_url" in result_item, "Async result should contain run_url"
-            logger.info(f"Async execution verified: run_id={result_item['run_id']}")
+        assert "run_id" in result_item, "Result should contain run_id"
+        assert "run_url" in result_item, "Result should contain run_url"
 
 
 # ==================== Common Helper Functions ====================
