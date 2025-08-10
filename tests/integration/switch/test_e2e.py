@@ -83,7 +83,6 @@ SWITCH_SUBDIR = "switch"
 SCHEMA_PREFIX = "e2e_lakebridge_switch"
 
 
-@pytest.mark.e2e
 @pytest.mark.skipif(
     os.getenv("LAKEBRIDGE_SWITCH_E2E") != "true",
     reason="Switch E2E tests disabled. Set LAKEBRIDGE_SWITCH_E2E=true to enable"
@@ -282,7 +281,7 @@ class TestLakebridgeSwitchConversion:
         if cls.examples_base_dir and cls.workspace_client:
             try:
                 cls.workspace_client.workspace.delete(cls.examples_base_dir, recursive=True)
-            except Exception:
+            except Exception as e:
                 logger.warning(f"Failed to delete examples directory: {e}")
 
     @classmethod
