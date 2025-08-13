@@ -85,16 +85,16 @@ Convert SQL from various dialects to Databricks Python notebooks with automatic 
 
 #### Built-in SQL Dialect Prompts
 
-| --source-dialect Value | Source Systems | Example Source Systems |
-|--------------|----------------|------------------------|
-| `mysql` | MySQL, MariaDB | Amazon Aurora MySQL, RDS, Google Cloud SQL |
-| `snowflake` | Snowflake | Snowflake data warehouse |
-| `oracle` | Oracle Database | Oracle Database, Exadata, Amazon RDS for Oracle |
-| `postgresql` | PostgreSQL | Amazon Aurora PostgreSQL, RDS, Google Cloud SQL |
-| `redshift` | Amazon Redshift | Amazon Redshift data warehouse |
-| `teradata` | Teradata | Teradata data warehouse |
-| `netezza` | IBM Netezza | IBM Netezza data warehouse appliance |
-| `tsql` | Microsoft SQL Server | Azure SQL Database, Azure Synapse Analytics, Amazon RDS for SQL Server |
+| `--source-dialect` Value | Source Systems |
+|-------------|----------------|
+| `mysql` | MySQL, MariaDB, and MySQL-compatible services (including Amazon Aurora MySQL, RDS, Google Cloud SQL) |
+| `netezza` | IBM Netezza |
+| `oracle` | Oracle Database, Oracle Exadata, and Oracle-compatible services (including Amazon RDS) |
+| `postgresql` | PostgreSQL and PostgreSQL-compatible services (including Amazon Aurora PostgreSQL, RDS, Google Cloud SQL) |
+| `redshift` | Amazon Redshift |
+| `snowflake` | Snowflake |
+| `teradata` | Teradata |
+| `tsql` | Microsoft SQL Server, Azure SQL family (Database, Managed Instance, Synapse Analytics), Amazon RDS for SQL Server |
 
 ### Generic Sources
 
@@ -102,7 +102,7 @@ Convert non-SQL files to notebooks or other formats without preprocessing.
 
 #### Built-in Generic Prompts
 
-| --source-dialect Value | Source → Target |
+| `--source-dialect` Value | Source → Target |
 |--------------|-----------------|
 | `python` | Python Script → Databricks Python Notebook |
 | `scala` | Scala Code → Databricks Python Notebook |
