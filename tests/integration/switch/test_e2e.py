@@ -41,7 +41,8 @@ from databricks.labs.lakebridge import cli
 from databricks.labs.lakebridge.config import TranspileConfig
 from databricks.labs.lakebridge.contexts.application import ApplicationContext
 from databricks.labs.lakebridge.deployment.installation import WorkspaceInstallation
-from databricks.labs.lakebridge.install import TranspilerInstaller, WorkspaceInstaller
+from databricks.labs.lakebridge.install import WorkspaceInstaller
+from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
 from switch.notebooks.pyscripts.types.builtin_prompt import BuiltinPrompt
 from switch.testing.e2e_utils import SwitchCleanupManager, SwitchExamplesManager, SwitchSchemaManager
 
@@ -466,7 +467,7 @@ class TestLakebridgeSwitchConversion:
 
 def _get_switch_job_id() -> Optional[int]:
     """Get Switch job ID from config"""
-    switch_config = TranspilerInstaller.read_switch_config()
+    switch_config = TranspilerRepository.user_home().read_switch_config()
     if switch_config:
         return switch_config.get('custom', {}).get('job_id')
     return None
