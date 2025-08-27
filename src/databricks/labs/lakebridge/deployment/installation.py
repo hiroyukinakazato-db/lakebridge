@@ -14,6 +14,7 @@ from databricks.sdk.errors.platform import InvalidParameterValue, ResourceDoesNo
 
 from databricks.labs.lakebridge.config import LakebridgeConfiguration
 from databricks.labs.lakebridge.deployment.recon import ReconDeployment
+from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
 
 logger = logging.getLogger("databricks.labs.lakebridge.install")
 
@@ -61,8 +62,8 @@ class WorkspaceInstallation:
     def _get_ws_version(self):
         try:
             return self._installation.load(Version)
-        except ResourceDoesNotExist as err:
-            logger.warning(f"Unable to get Workspace Version due to: {err}")
+        except ResourceDoesNotExist:
+            logger.debug("No existing version found in workspace; assuming fresh installation.")
             return None
 
     def _apply_upgrades(self):
@@ -131,14 +132,13 @@ class WorkspaceInstallation:
         """Uninstall Switch transpiler if installed."""
         try:
             # Check if Switch transpiler is installed
-            from databricks.labs.lakebridge.install import TranspilerInstaller
-            switch_config_path = TranspilerInstaller.transpiler_config_path("switch")
+            switch_config_path = TranspilerRepository.user_home().transpiler_config_path("switch")
             if not switch_config_path.exists():
                 logger.debug("Switch transpiler not found, skipping uninstall")
                 return
 
             # Read config and uninstall from workspace if needed
-            config_data = TranspilerInstaller.read_switch_config()
+            config_data = TranspilerRepository.user_home().read_switch_config()
             if not config_data:
                 logger.warning("Switch config is empty, skipping workspace cleanup")
             else:
@@ -178,8 +178,7 @@ class WorkspaceInstallation:
 
     def _remove_switch_local_directory(self) -> None:
         """Remove local Switch transpiler directory."""
-        from databricks.labs.lakebridge.install import TranspilerInstaller
-        switch_transpiler_path = TranspilerInstaller.transpilers_path() / "switch"
+        switch_transpiler_path = TranspilerRepository.user_home().transpilers_path() / "switch"
         if not switch_transpiler_path.exists():
             return
 

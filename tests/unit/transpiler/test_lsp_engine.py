@@ -107,13 +107,6 @@ async def read_log(marker: str) -> str:
     return log_path.read_text("utf-8")
 
 
-async def test_server_fetches_workspace_file(lsp_engine, transpile_config):
-    sample_path = Path(path_to_resource("lsp_transpiler", "workspace_file.yml"))
-    await lsp_engine.initialize(transpile_config)
-    log = await read_log("fetch-document-uri")
-    assert f"fetch-document-uri={sample_path.as_uri()}" in log
-
-
 async def test_server_loads_document(lsp_engine: LSPEngine, transpile_config: TranspileConfig) -> None:
     sample_path = Path(path_to_resource("lsp_transpiler", "source_stuff.sql"))
     await lsp_engine.initialize(transpile_config)

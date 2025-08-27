@@ -30,7 +30,7 @@ import pytest
 
 from databricks.labs.lakebridge import cli
 from databricks.labs.lakebridge.config import TranspileConfig
-from databricks.labs.lakebridge.install import TranspilerInstaller
+from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
 from .fixtures import switch_config_path, switch_config_data, mock_application_context
 
 
@@ -60,7 +60,7 @@ class TestSwitchCLIIntegration:
         assert is_switch_request is True, "Switch should be detected when config exists"
 
         # Verify Switch appears in available transpilers
-        all_transpilers = TranspilerInstaller.all_transpiler_names()
+        all_transpilers = TranspilerRepository.user_home().all_transpiler_names()
         assert 'switch' in all_transpilers, "Switch should appear in transpiler list"
 
     def test_switch_routing_decision(self, switch_config_path):
@@ -206,7 +206,7 @@ class TestSwitchCLIIntegration:
 
     def test_config_job_id_extraction(self):
         """Test job ID extraction from Switch config (essential for CLI integration)"""
-        switch_config = TranspilerInstaller.read_switch_config()
+        switch_config = TranspilerRepository.user_home().read_switch_config()
         assert switch_config is not None, "Switch config should exist"
         assert 'custom' in switch_config, "Config should have custom section"
         

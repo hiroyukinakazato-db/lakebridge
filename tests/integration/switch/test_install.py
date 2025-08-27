@@ -49,7 +49,7 @@ class TestSwitchInstallationProcess:
         """Test workspace deployment creates Databricks job"""
 
         # Setup Switch config structure
-        with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
+        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=tmp_path):
             switch_dir = tmp_path / "switch" / "lib"
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
@@ -59,7 +59,7 @@ class TestSwitchInstallationProcess:
                 yaml.dump(switch_config_data, f)
 
             # Mock read_switch_config to return the prepared config data
-            with patch('databricks.labs.lakebridge.install.TranspilerInstaller.read_switch_config', return_value=switch_config_data):
+            with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.read_switch_config', return_value=switch_config_data):
                 # Mock SwitchInstaller to return job information
                 with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
                     mock_installer = MagicMock()
@@ -94,7 +94,7 @@ class TestSwitchInstallationProcess:
         """Test config update writes job information to config.yml"""
 
         # Setup config environment
-        with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
+        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=tmp_path):
             switch_dir = tmp_path / "switch" / "lib"
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
@@ -129,7 +129,7 @@ class TestSwitchInstallationProcess:
     def test_installation_with_cleanup(self, tmp_path, mock_install_result, mock_workspace_client):
         """Test Switch installation with cleanup of previous installation"""
         # Setup environment with existing Switch installation
-        with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
+        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=tmp_path):
             switch_dir = tmp_path / "switch" / "lib"
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
@@ -155,7 +155,7 @@ class TestSwitchInstallationProcess:
                 yaml.dump(previous_config_data, f)
 
             # Mock read_switch_config to return the previous config data
-            with patch('databricks.labs.lakebridge.install.TranspilerInstaller.read_switch_config', return_value=previous_config_data):
+            with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.read_switch_config', return_value=previous_config_data):
                 # Mock workspace deployment
                 with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
                     mock_installer = MagicMock()
@@ -198,7 +198,7 @@ class TestSwitchInstallationProcess:
     def test_installation_error_handling(self, tmp_path, switch_config_data, mock_workspace_client, caplog):
         """Test error handling during installation process"""
         # Setup config environment
-        with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
+        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=tmp_path):
             switch_dir = tmp_path / "switch" / "lib"
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
@@ -239,15 +239,15 @@ class TestSwitchInstallationProcess:
 
     def test_config_validation(self, tmp_path):
         """Test config file validation and error handling"""
-        from databricks.labs.lakebridge.install import TranspilerInstaller
+        from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
         
-        with patch('databricks.labs.lakebridge.install.TranspilerInstaller.transpilers_path', return_value=tmp_path):
+        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=tmp_path):
             switch_dir = tmp_path / "switch" / "lib" 
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
 
             # Test missing config file (implementation: return None)
-            config = TranspilerInstaller.read_switch_config()
+            config = TranspilerRepository.user_home().read_switch_config()
             assert config is None, "Config file not found should return None"
             logger.info("Missing config file handling verified: None returned")
 
@@ -255,7 +255,7 @@ class TestSwitchInstallationProcess:
             with config_path.open("w") as f:
                 f.write("invalid: yaml: content: [")
 
-            config = TranspilerInstaller.read_switch_config()
+            config = TranspilerRepository.user_home().read_switch_config()
             assert config is None, "Invalid YAML should return None"
             logger.info("Invalid YAML handling verified: None returned")
 
@@ -274,7 +274,7 @@ class TestSwitchInstallationProcess:
             with config_path.open("w") as f:
                 yaml.dump(valid_config, f)
 
-            config = TranspilerInstaller.read_switch_config()
+            config = TranspilerRepository.user_home().read_switch_config()
             assert config is not None, "Valid config should return parsed data"
             assert config["remorph"]["name"] == "switch", "Config content should be correctly parsed"
             logger.info("Valid config handling verified: parsed data returned")

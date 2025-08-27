@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
-from databricks.labs.lakebridge.install import TranspilerInstaller
+from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
 
 
 @pytest.fixture
@@ -65,9 +65,11 @@ def switch_config_path(switch_config_data):
         with config_path.open("w") as f:
             yaml.dump(switch_config_data, f)
 
-        # Patch TranspilerInstaller to use temp directory
-        with patch.object(TranspilerInstaller, "transpilers_path", return_value=temp_path):
-            yield config_path
+        # Patch TranspilerRepository to use temp directory
+        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=temp_path):
+            with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.all_transpiler_names', return_value={'switch'}):
+                with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.read_switch_config', return_value=switch_config_data):
+                    yield config_path
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ from databricks.sdk.config import Config
 from databricks.sdk.errors import NotFound
 from databricks.sdk.service.iam import User
 
+from databricks.labs.lakebridge.analyzer.lakebridge_analyzer import LakebridgeAnalyzer
 from databricks.labs.lakebridge.config import TranspileConfig, ReconcileConfig, LakebridgeConfiguration
 from databricks.labs.lakebridge.deployment.configurator import ResourceConfigurator
 from databricks.labs.lakebridge.deployment.dashboard import DashboardDeployment
@@ -22,6 +23,7 @@ from databricks.labs.lakebridge.helpers.metastore import CatalogOperations
 logger = logging.getLogger(__name__)
 
 
+# pylint: disable=too-many-public-methods
 class ApplicationContext:
     def __init__(self, ws: WorkspaceClient):
         self._ws = ws
@@ -131,3 +133,8 @@ class ApplicationContext:
     @cached_property
     def upgrades(self):
         return Upgrades(self.product_info, self.installation)
+
+    @cached_property
+    def analyzer(self):
+        is_debug = logger.getEffectiveLevel() == logging.DEBUG
+        return LakebridgeAnalyzer(self.current_user, self.prompts, is_debug)
