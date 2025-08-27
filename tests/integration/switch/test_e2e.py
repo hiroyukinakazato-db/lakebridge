@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound
+from databricks.sdk.service.workspace import ImportFormat
 
 from databricks.labs.lakebridge import cli
 from databricks.labs.lakebridge.config import TranspileConfig
@@ -43,8 +44,7 @@ from databricks.labs.lakebridge.contexts.application import ApplicationContext
 from databricks.labs.lakebridge.deployment.installation import WorkspaceInstallation
 from databricks.labs.lakebridge.install import WorkspaceInstaller
 from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
-from switch.notebooks.pyscripts.types.builtin_prompt import BuiltinPrompt
-from switch.testing.e2e_utils import SwitchCleanupManager, SwitchExamplesManager, SwitchSchemaManager
+from switch.testing.e2e_utils import SwitchCleanupManager, SwitchSchemaManager
 
 logger = logging.getLogger(__name__)
 
@@ -188,10 +188,10 @@ class TestLakebridgeSwitchConversion:
     # Class-level shared resources
     workspace_client = None
     cleanup_manager = None
-    examples_manager = None
     schema_manager = None
     job_id = None
     examples_base_dir = None
+    test_resources_dir = None
     config = None
 
     @classmethod
@@ -253,15 +253,12 @@ class TestLakebridgeSwitchConversion:
         current_user = cls.workspace_client.current_user.me().user_name
         cls.examples_base_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}{EXAMPLES_DIR_SUFFIX}"
 
+        # Set up test resources directory
+        cls.test_resources_dir = Path(__file__).parent.parent.parent / "resources" / "switch"
+
         # Upload examples once
         logger.info(f"Uploading examples to {cls.examples_base_dir}")
-        cls.examples_manager = SwitchExamplesManager(cls.workspace_client)
-        cls.examples_manager.upload_examples_to_workspace(
-            base_dir=cls.examples_base_dir,
-            sql_dialects=['snowflake', 'tsql'],
-            code_types=[],
-            include_workflow=True
-        )
+        cls._upload_test_examples()
 
     @classmethod
     def _cleanup_resources(cls) -> None:
@@ -284,6 +281,51 @@ class TestLakebridgeSwitchConversion:
                 cls.workspace_client.workspace.delete(cls.examples_base_dir, recursive=True)
             except Exception as e:
                 logger.warning(f"Failed to delete examples directory: {e}")
+
+    @classmethod
+    def _upload_test_examples(cls) -> None:
+        """Upload test examples from local resources to workspace"""
+        # Upload entire test resources directory using switch e2e_utils pattern
+        cls._upload_directory_to_workspace(cls.test_resources_dir, cls.examples_base_dir)
+
+    @classmethod
+    def _upload_directory_to_workspace(cls, local_dir: Path, workspace_dir: str) -> None:
+        """Upload a local directory to workspace"""
+        if not local_dir.exists():
+            logger.warning(f"Local directory {local_dir} does not exist, skipping")
+            return
+
+        logger.info(f"Uploading {local_dir} -> {workspace_dir}")
+
+        # Create workspace directory
+        cls.workspace_client.workspace.mkdirs(workspace_dir)
+
+        # Upload all files recursively
+        file_count = 0
+        for file_path in local_dir.rglob('*'):
+            if file_path.is_file():
+                # Calculate relative path to maintain directory structure
+                relative_path = file_path.relative_to(local_dir)
+                workspace_file_path = f"{workspace_dir}/{relative_path}"
+                
+                # Create parent directories if needed
+                workspace_parent = "/".join(workspace_file_path.split("/")[:-1])
+                if workspace_parent != workspace_dir.rstrip("/"):
+                    cls.workspace_client.workspace.mkdirs(workspace_parent)
+                
+                # Upload file
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                cls.workspace_client.workspace.upload(
+                    path=workspace_file_path,
+                    content=content,
+                    format=ImportFormat.AUTO,
+                    overwrite=True
+                )
+                logger.info(f"  ✓ Uploaded: {workspace_file_path}")
+                file_count += 1
+
+        logger.info(f"  Directory upload completed: {file_count} files")
 
     @classmethod
     def _ensure_switch_installed_class(cls, workspace_client: WorkspaceClient) -> int:
@@ -332,9 +374,7 @@ class TestLakebridgeSwitchConversion:
 
         try:
             # Execute conversion using shared resources
-            input_dir = self.examples_manager.get_example_workspace_path(
-                self.examples_base_dir, BuiltinPrompt.SNOWFLAKE
-            )
+            input_dir = f"{self.examples_base_dir}/sql/snowflake"
             output_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}-basic-output-{int(time.time())}"
 
             result = self._execute_conversion(
@@ -343,8 +383,7 @@ class TestLakebridgeSwitchConversion:
                 input_source=input_dir,
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
-                schema_name=self.config.test_schema,
-                job_id=self.job_id
+                schema_name=self.config.test_schema
             )
 
             # Verify result
@@ -360,9 +399,7 @@ class TestLakebridgeSwitchConversion:
 
         try:
             # Execute conversion with advanced parameters using shared resources
-            input_dir = self.examples_manager.get_example_workspace_path(
-                self.examples_base_dir, BuiltinPrompt.TSQL
-            )
+            input_dir = f"{self.examples_base_dir}/sql/tsql"
             output_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}-advanced-output-{int(time.time())}"
             sql_output_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}-advanced-sql-{int(time.time())}"
 
@@ -373,7 +410,6 @@ class TestLakebridgeSwitchConversion:
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
                 schema_name=self.config.test_schema,
-                job_id=self.job_id,
                 extra_options={
                     "log_level": "DEBUG",
                     "comment_lang": "Japanese",
@@ -396,9 +432,7 @@ class TestLakebridgeSwitchConversion:
 
         try:
             # Execute conversion using shared resources
-            input_dir = self.examples_manager.get_example_workspace_path(
-                self.examples_base_dir, BuiltinPrompt.AIRFLOW
-            )
+            input_dir = f"{self.examples_base_dir}/workflow/airflow"
             output_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}-airflow-output-{int(time.time())}"
 
             result = self._execute_conversion(
@@ -408,7 +442,6 @@ class TestLakebridgeSwitchConversion:
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,
                 schema_name=self.config.test_schema,
-                job_id=self.job_id,
                 extra_options={
                     "source_format": "generic",
                     "target_type": "file",
@@ -427,8 +460,7 @@ class TestLakebridgeSwitchConversion:
 
     def _execute_conversion(self, workspace_client: WorkspaceClient, 
                            source_dialect: str, input_source: str, output_folder: str,
-                           catalog_name: str, schema_name: str, 
-                           job_id: Optional[int] = None,
+                           catalog_name: str, schema_name: str,
                            extra_options: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """Execute Lakebridge conversion (always async)"""
         # Prepare transpiler options
