@@ -135,15 +135,17 @@ More details about the BladeBridge converter [here](/docs/transpile/pluggable_tr
 
 ### Switch
 
-Switch leverages Large Language Models (LLMs) to convert SQL and other source formats into Databricks-compatible outputs. Using [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/), Switch understands code intent and semantics to generate Python notebooks with Spark SQL or generic text files.
+Switch is an LLM-powered Lakebridge transpiler that extends beyond SQL to convert various source formats into Databricks-compatible outputs. Using [Mosaic AI Model Serving](https://docs.databricks.com/aws/en/machine-learning/model-serving/), it understands code intent and semantics to handle complex transformations.
 
 Key characteristics:
-- **LLM-powered conversion** - Uses Databricks Model Serving endpoints to interpret SQL, workflows, and other formats
-- **Flexible outputs** - Python notebooks (.py) by default; generic files (YAML, JSON, etc.) as option
-- **Batch processing** - Executes as Databricks Jobs with parallel processing
-- **Extensible prompts** - Custom YAML prompts for new dialects and conversion requirements
+- **LLM-powered extensibility** - Built-in prompts for multiple SQL dialects (T-SQL, Snowflake, Teradata, Oracle, etc.) and generic formats (Python, Scala, Airflow)
+- **Custom prompt support** - Add YAML prompts to handle any source format not covered by built-in options  
+- **Flexible outputs** - Python notebooks with Spark SQL (default), SQL notebooks (experimental), or any text-based format
+- **Databricks-native processing** - Executes as scalable Lakeflow Jobs with serverless compute
+- **Model flexibility** - Choose any Model Serving endpoint to match your organization's requirements
+- **Complex logic handling** - Excels at stored procedures and business logic beyond ANSI SQL/PSM standards
 
-Switch excels at complex stored procedures and business logic where context matters. Generated outputs provide a strong foundation for migration, though manual review is recommended.
+Switch's LLM-based approach enables support for any source format through custom prompts. For built-in prompt details and custom prompt creation, see the [Switch documentation](/docs/transpile/pluggable_transpilers/switch).
 
 ### Supported dialects
 

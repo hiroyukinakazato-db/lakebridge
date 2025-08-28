@@ -75,11 +75,13 @@ class TestSwitchInstallationProcess:
 
                     # Mock the display method to avoid stdout during tests
                     with patch.object(installer, '_display_switch_installation_details') as mock_display:
-                        # Execute workspace deployment
-                        installer.install_switch()
+                        # Mock Switch version import
+                        with patch('switch.__version__', '1.0.1'):
+                            # Execute workspace deployment
+                            installer.install_switch()
 
-                        # Verify display method was called with install result
-                        mock_display.assert_called_once_with(mock_install_result)
+                            # Verify display method was called with install result
+                            mock_display.assert_called_once_with(mock_install_result)
 
                     # Verify SwitchInstaller was called correctly
                     mock_switch_installer_class.assert_called_once_with(mock_workspace_client)
@@ -87,6 +89,17 @@ class TestSwitchInstallationProcess:
                         previous_job_id=12345,
                         previous_switch_home="/Workspace/Users/test/.lakebridge-switch"
                     )
+
+                    # Verify version.json was created
+                    version_json_path = tmp_path / "switch" / "state" / "version.json"
+                    assert version_json_path.exists(), "version.json should be created"
+
+                    import json
+                    with version_json_path.open('r') as f:
+                        version_data = json.load(f)
+
+                    assert version_data['version'] == 'v1.0.1', "Version should match Switch version"
+                    assert 'date' in version_data, "Version data should contain date field"
 
                 logger.info(f"Workspace deployment completed. Job ID: {mock_install_result.job_id}")
 
@@ -202,7 +215,7 @@ class TestSwitchInstallationProcess:
             switch_dir = tmp_path / "switch" / "lib"
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
-            
+
             # Create initial config file
             with config_path.open("w") as f:
                 yaml.dump(switch_config_data, f)
@@ -213,34 +226,36 @@ class TestSwitchInstallationProcess:
                 product_info=None, resource_configurator=None, workspace_installation=None
             )
 
-            # Test SwitchInstaller import error (implementation: log error and raise RuntimeError)
-            with patch('switch.api.installer.SwitchInstaller', side_effect=ImportError("Switch package not available")):
-                with caplog.at_level(logging.ERROR):
-                    with pytest.raises(RuntimeError, match="Switch package not installed"):
-                        installer.install_switch()  # should raise RuntimeError
-                        
-                # verify error messages are logged
-                assert "Switch package not found" in caplog.text
-                assert "Please install Switch package first" in caplog.text
-                logger.info("ImportError handling verified: error logged and RuntimeError raised")
+            # Mock version state setup (not relevant to error handling tests)
+            with patch.object(installer, '_setup_switch_version_state'):
+                # Test SwitchInstaller import error (implementation: log error and raise RuntimeError)
+                with patch('switch.api.installer.SwitchInstaller', side_effect=ImportError("Switch package not available")):
+                    with caplog.at_level(logging.ERROR):
+                        with pytest.raises(RuntimeError, match="Switch package not installed"):
+                            installer.install_switch()  # should raise RuntimeError
 
-            # Test SwitchInstaller.install() failure (implementation: re-raise as RuntimeError)
-            with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
-                mock_installer = MagicMock()
-                mock_installer.install.side_effect = Exception("Job creation failed")
-                mock_switch_installer_class.return_value = mock_installer
+                    # verify error messages are logged
+                    assert "Switch package not found" in caplog.text
+                    assert "Please install Switch package first" in caplog.text
+                    logger.info("ImportError handling verified: error logged and RuntimeError raised")
 
-                with pytest.raises(RuntimeError, match="Switch workspace deployment failed"):
-                    installer.install_switch()
-                
-                logger.info("General exception handling verified: RuntimeError raised")
+                # Test SwitchInstaller.install() failure (implementation: re-raise as RuntimeError)
+                with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
+                    mock_installer = MagicMock()
+                    mock_installer.install.side_effect = Exception("Job creation failed")
+                    mock_switch_installer_class.return_value = mock_installer
+
+                    with pytest.raises(RuntimeError, match="Switch workspace deployment failed"):
+                        installer.install_switch()
+
+                    logger.info("General exception handling verified: RuntimeError raised")
 
             logger.info("Error handling tests completed successfully")
 
     def test_config_validation(self, tmp_path):
         """Test config file validation and error handling"""
         from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
-        
+
         with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=tmp_path):
             switch_dir = tmp_path / "switch" / "lib" 
             switch_dir.mkdir(parents=True)

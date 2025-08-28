@@ -49,7 +49,7 @@ Internally, Lakebridge can use three different transpilers:
 
  - *BladeBridge*, a mature transpiler that can handle a wide range of source dialects as well as some ETL/orchestration.
  - *Morpheus*, a next-generation transpiler that currently handles a smaller set of dialects, but includes experimental support for dbt.
- - *Switch*, an LLM-powered transpiler that uses Large Language Models to convert SQL from multiple dialects to Databricks notebooks.
+ - *Switch*, an LLM-powered transpiler that uses Large Language Models to convert SQL and other source formats to Databricks notebooks.
 
 The table below summarizes the source platforms that we currently support:
 
@@ -62,8 +62,6 @@ The table below summarizes the source platforms that we currently support:
 | Snowflake                    |             | &#x2705; | &#x2705; |                   |      &#x2705;      |
 | MS SQL Server (incl. Synapse)|  &#x2705;   |          | &#x2705; |                   |                    |
 | Teradata                     |  &#x2705;   |          | &#x2705; |                   |                    |
-
-Additionally, Switch leverages LLMs to handle SQL conversions and can be extended to support various SQL dialects through customizable conversion prompts.
 
 For more information on using the transpiler, refer to the [Transpile][3] documentation.
 

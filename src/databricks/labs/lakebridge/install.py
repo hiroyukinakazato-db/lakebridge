@@ -476,17 +476,20 @@ class WorkspaceInstaller:
 
     def install_switch(self):
         """Install Switch transpiler with workspace deployment.
-        
+
         Note: Switch Python package should be installed as a Lakebridge dependency.
         This method handles workspace deployment and job creation.
         """
-        # Step 1: Setup Switch config by copying lsp resources
-        self._setup_switch_config()
+        # Step 1: Setup Switch LSP config.yml by copying lsp resources
+        self._setup_switch_lsp_config()
 
-        # Step 2: Extract previous installation info for cleanup
+        # Step 2: Setup state/version.json
+        self._setup_switch_version_state()
+
+        # Step 3: Extract previous installation info for cleanup
         previous_job_id, previous_switch_home = self._get_previous_switch_installation()
 
-        # Step 3: Deploy to workspace and create job (with automatic cleanup)
+        # Step 4: Deploy to workspace and create job (with automatic cleanup)
         try:
             from switch.api.installer import SwitchInstaller
 
@@ -500,10 +503,10 @@ class WorkspaceInstaller:
                 previous_switch_home=previous_switch_home
             )
 
-            # Step 4: Update config.yml with job information
+            # Step 5: Update config.yml with job information
             self._update_switch_config(install_result)
 
-            # Step 5: Display installation details to user
+            # Step 6: Display installation details to user
             self._display_switch_installation_details(install_result)
 
         except ImportError as e:
@@ -514,8 +517,8 @@ class WorkspaceInstaller:
             logger.error(f"Failed to deploy Switch to workspace: {e}")
             raise RuntimeError(f"Switch workspace deployment failed: {e}") from e
 
-    def _setup_switch_config(self):
-        """Setup Switch config by copying lsp resources from installed package."""
+    def _setup_switch_lsp_config(self):
+        """Setup Switch LSP config by copying lsp resources from installed package."""
         # Find lsp folder in current environment's site-packages
         lsp_source = None
         for site_pkg in site.getsitepackages():
@@ -535,6 +538,16 @@ class WorkspaceInstaller:
         shutil.copytree(lsp_source, target_path, dirs_exist_ok=True)
 
         logger.info(f"Setup Switch config: {target_path / 'config.yml'}")
+
+    def _setup_switch_version_state(self):
+        """Setup state/version.json for Switch transpiler"""
+        from switch import __version__
+
+        # Create state directory and version.json
+        switch_path = self._transpiler_repository.transpilers_path() / "switch"
+        TranspilerInstaller._store_product_state(switch_path, __version__)
+
+        logger.info(f"Setup Switch version state: v{__version__}")
 
     def _get_previous_switch_installation(self) -> tuple[int | None, str | None]:
         """Extract previous Switch installation info from config for cleanup.
