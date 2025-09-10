@@ -42,7 +42,7 @@ from databricks.labs.lakebridge import cli
 from databricks.labs.lakebridge.config import TranspileConfig
 from databricks.labs.lakebridge.contexts.application import ApplicationContext
 from databricks.labs.lakebridge.deployment.installation import WorkspaceInstallation
-from databricks.labs.lakebridge.install import WorkspaceInstaller
+from databricks.labs.lakebridge.transpiler.installers import SwitchInstaller
 from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
 from switch.testing.e2e_utils import SwitchCleanupManager, SwitchSchemaManager
 
@@ -133,14 +133,10 @@ class TestSwitchInstallationLifecycle:
         logger.info("Installing Switch transpiler")
 
         try:
-            # Install to workspace using Lakebridge installer
-            app_context = ApplicationContext(workspace_client)
-            installer = WorkspaceInstaller(
-                app_context.workspace_client, app_context.prompts, app_context.installation,
-                app_context.install_state, app_context.product_info, app_context.resource_configurator,
-                app_context.workspace_installation,
-            )
-            installer.install_switch()
+            # Install using new SwitchInstaller pattern
+            transpiler_repository = TranspilerRepository.user_home()
+            switch_installer = SwitchInstaller(transpiler_repository, workspace_client)
+            switch_installer.install()
             logger.info("Switch installation completed")
         except Exception as e:
             logger.error(f"Switch installation failed: {e}")
@@ -344,14 +340,10 @@ class TestLakebridgeSwitchConversion:
         logger.info("Installing Switch transpiler")
         
         try:
-            # Install to workspace using Lakebridge installer
-            app_context = ApplicationContext(workspace_client)
-            installer = WorkspaceInstaller(
-                app_context.workspace_client, app_context.prompts, app_context.installation,
-                app_context.install_state, app_context.product_info, app_context.resource_configurator,
-                app_context.workspace_installation,
-            )
-            installer.install_switch()
+            # Install using new SwitchInstaller pattern
+            transpiler_repository = TranspilerRepository.user_home()
+            switch_installer = SwitchInstaller(transpiler_repository, workspace_client)
+            switch_installer.install()
             logger.info("Switch installation completed")
         except Exception as e:
             logger.error(f"Switch installation failed: {e}")

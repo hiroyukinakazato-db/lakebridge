@@ -251,6 +251,7 @@ def transpile(
         logger.info(f"Switch result: {json.dumps(result)}")
         print(json.dumps(result))
         return
+
     checker = _TranspileConfigChecker(ctx.transpile_config, ctx.prompts, transpiler_repository)
     checker.use_transpiler_config_path(transpiler_config_path)
     checker.use_source_dialect(source_dialect)

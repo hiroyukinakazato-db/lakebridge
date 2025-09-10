@@ -176,7 +176,7 @@ Switch operates differently from other Lakebridge transpilers:
 
 #### Required Parameters
 - `--transpiler-config-path` - Local path to Switch configuration file (identifies Switch as the transpiler)
-- `--input-source` - Databricks workspace path(s) containing files to convert (see Input Source Patterns below)
+- `--input-source` - Databricks workspace path(s) or Unity Catalog Volume path(s) containing files to convert (see Input Source Patterns below)
 - `--output-folder` - Databricks workspace path for generated outputs
 - `--source-dialect` - Conversion type to use. Choose from:
   - **SQL Dialects**: `mysql`, `snowflake`, `oracle`, `postgresql`, `redshift`, `teradata`, `netezza`, `tsql`
