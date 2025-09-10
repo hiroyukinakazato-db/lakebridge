@@ -10,7 +10,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import NoReturn
 
-from databricks.sdk.core import with_user_agent_extra
 from databricks.sdk.service.sql import CreateWarehouseRequestWarehouseType
 from databricks.sdk import WorkspaceClient
 
@@ -219,6 +218,7 @@ def _execute_switch_directly(ctx: ApplicationContext, config: TranspileConfig) -
 
 @lakebridge.command
 def transpile(
+    *,
     w: WorkspaceClient,
     transpiler_config_path: str | None = None,
     source_dialect: str | None = None,
@@ -233,7 +233,7 @@ def transpile(
     """Transpiles source dialect to databricks dialect"""
     ctx = ApplicationContext(w)
     logger.debug(f"Preconfigured transpiler config: {ctx.transpile_config!r}")
-    with_user_agent_extra("cmd", "execute-transpile")
+    ctx.add_user_agent_extra("cmd", "execute-transpile")
 
     # Early Switch detection to bypass local path validation
     # Switch uses workspace paths which would fail in checker.use_input_source()
@@ -251,7 +251,6 @@ def transpile(
         logger.info(f"Switch result: {json.dumps(result)}")
         print(json.dumps(result))
         return
-
     checker = _TranspileConfigChecker(ctx.transpile_config, ctx.prompts, transpiler_repository)
     checker.use_transpiler_config_path(transpiler_config_path)
     checker.use_source_dialect(source_dialect)
@@ -265,10 +264,10 @@ def transpile(
     logger.debug(f"Final configuration for transpilation: {config!r}")
 
     assert config.source_dialect is not None, "Source dialect has been validated by this point."
-    with_user_agent_extra("transpiler_source_tech", make_alphanum_or_semver(config.source_dialect))
+    ctx.add_user_agent_extra("transpiler_source_tech", make_alphanum_or_semver(config.source_dialect))
     plugin_name = engine.transpiler_name
     plugin_name = re.sub(r"\s+", "_", plugin_name)
-    with_user_agent_extra("transpiler_plugin_name", plugin_name)
+    ctx.add_user_agent_extra("transpiler_plugin_name", plugin_name)
     user = ctx.current_user
     logger.debug(f"User: {user}")
 
@@ -480,7 +479,7 @@ class _TranspileConfigChecker:
                 return None
             case 1:
                 # Only one transpiler available for the specified dialect, use it.
-                transpiler_name = compatible_transpilers.pop()
+                transpiler_name = next(iter(compatible_transpilers))
                 logger.debug(f"Using only transpiler available for dialect {source_dialect!r}: {transpiler_name!r}")
             case _:
                 # Multiple transpilers available for the specified dialect, prompt for which to use.
@@ -503,6 +502,8 @@ class _TranspileConfigChecker:
                 supported_dialects = ", ".join(self._transpiler_repository.all_dialects())
                 msg = f"{msg_prefix}: {source_dialect!r} (supported dialects: {supported_dialects})"
                 raise_validation_exception(msg)
+            else:
+                self._config = dataclasses.replace(self._config, source_dialect=source_dialect)
         else:
             # Check the source dialect against the engine.
             if source_dialect not in engine.supported_dialects:
@@ -521,7 +522,7 @@ class _TranspileConfigChecker:
                 raise_validation_exception(msg)
             case 1:
                 # Only one dialect available, use it.
-                source_dialect = supported_dialects.pop()
+                source_dialect = next(iter(supported_dialects))
                 logger.debug(f"Using only source dialect available: {source_dialect!r}")
             case _:
                 # Multiple dialects available, prompt for which to use.
@@ -529,6 +530,7 @@ class _TranspileConfigChecker:
                 source_dialect = self._prompts.choice("Select the source dialect:", list(supported_dialects))
         engine = self._configure_transpiler_config_path(source_dialect)
         assert engine is not None, "No transpiler engine available for a supported dialect; configuration is invalid."
+        self._config = dataclasses.replace(self._config, source_dialect=source_dialect)
         return engine
 
     def _check_lsp_engine(self) -> TranspileEngine:
@@ -631,7 +633,7 @@ class _TranspileConfigChecker:
 
 async def _transpile(ctx: ApplicationContext, config: TranspileConfig, engine: TranspileEngine) -> RootJsonValue:
     """Transpiles source dialect to databricks dialect"""
-    with_user_agent_extra("cmd", "execute-transpile")
+    ctx.add_user_agent_extra("cmd", "execute-transpile")
     user = ctx.current_user
     logger.debug(f"User: {user}")
     _override_workspace_client_config(ctx, config.sdk_config)
@@ -681,10 +683,10 @@ def _override_workspace_client_config(ctx: ApplicationContext, overrides: dict[s
 
 
 @lakebridge.command
-def reconcile(w: WorkspaceClient) -> None:
+def reconcile(*, w: WorkspaceClient) -> None:
     """[EXPERIMENTAL] Reconciles source to Databricks datasets"""
-    with_user_agent_extra("cmd", "execute-reconcile")
     ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "execute-reconcile")
     user = ctx.current_user
     logger.debug(f"User: {user}")
     recon_runner = ReconcileRunner(
@@ -697,10 +699,10 @@ def reconcile(w: WorkspaceClient) -> None:
 
 
 @lakebridge.command
-def aggregates_reconcile(w: WorkspaceClient) -> None:
+def aggregates_reconcile(*, w: WorkspaceClient) -> None:
     """[EXPERIMENTAL] Reconciles Aggregated source to Databricks datasets"""
-    with_user_agent_extra("cmd", "execute-aggregates-reconcile")
     ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "execute-aggregates-reconcile")
     user = ctx.current_user
     logger.debug(f"User: {user}")
     recon_runner = ReconcileRunner(
@@ -715,8 +717,8 @@ def aggregates_reconcile(w: WorkspaceClient) -> None:
 
 @lakebridge.command
 def generate_lineage(
-    w: WorkspaceClient,
     *,
+    w: WorkspaceClient,
     source_dialect: str | None = None,
     input_source: str,
     output_folder: str,
@@ -741,7 +743,7 @@ def generate_lineage(
 
 
 @lakebridge.command
-def configure_secrets(w: WorkspaceClient) -> None:
+def configure_secrets(*, w: WorkspaceClient) -> None:
     """Setup reconciliation connection profile details as Secrets on Databricks Workspace"""
     recon_conf = ReconConfigPrompts(w)
 
@@ -767,16 +769,18 @@ def configure_database_profiler() -> None:
     assessment.run()
 
 
-@lakebridge.command()
+@lakebridge.command
 def install_transpile(
+    *,
     w: WorkspaceClient,
     artifact: str | None = None,
     transpiler_repository: TranspilerRepository = TranspilerRepository.user_home(),
 ) -> None:
     """Install or upgrade the Lakebridge transpilers."""
-    with_user_agent_extra("cmd", "install-transpile")
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "install-transpile")
     if artifact:
-        with_user_agent_extra("artifact-overload", Path(artifact).name)
+        ctx.add_user_agent_extra("artifact-overload", Path(artifact).name)
     user = w.current_user
     logger.debug(f"User: {user}")
     transpile_installer = installer(w, transpiler_repository)
@@ -785,11 +789,13 @@ def install_transpile(
 
 @lakebridge.command(is_unauthenticated=False)
 def configure_reconcile(
+    *,
     w: WorkspaceClient,
     transpiler_repository: TranspilerRepository = TranspilerRepository.user_home(),
 ) -> None:
     """Configure the Lakebridge reconciliation module"""
-    with_user_agent_extra("cmd", "configure-reconcile")
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "configure-reconcile")
     user = w.current_user
     logger.debug(f"User: {user}")
     if not w.config.warehouse_id:
@@ -800,16 +806,17 @@ def configure_reconcile(
     reconcile_installer.run(module="reconcile")
 
 
-@lakebridge.command()
+@lakebridge.command
 def analyze(
+    *,
     w: WorkspaceClient,
     source_directory: str | None = None,
     report_file: str | None = None,
     source_tech: str | None = None,
 ):
     """Run the Analyzer"""
-    with_user_agent_extra("cmd", "analyze")
     ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "analyze")
 
     logger.debug(f"User: {ctx.current_user}")
     ctx.analyzer.run_analyzer(source_directory, report_file, source_tech)
