@@ -163,16 +163,6 @@ class TranspilerRepository:
             return []  # gracefully returns an empty list, since this can only happen during testing
         return config.options_for_dialect(source_dialect)
 
-    def read_switch_config(self) -> dict | None:
-        """Read Switch config.yml file, returning parsed data or None if reading fails."""
-        try:
-            import yaml
-            config_path = self.transpiler_config_path("switch")
-            with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
-        except Exception:
-            return None
-
     def _all_transpiler_configs(self) -> Iterable[LSPConfig]:
         transpilers_path = self.transpilers_path()
         if transpilers_path.exists():

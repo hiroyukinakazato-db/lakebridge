@@ -64,9 +64,13 @@ def switch_config_path(switch_config_data):
             yaml.dump(switch_config_data, f)
 
         # Patch TranspilerRepository to use temp directory
-        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=temp_path):
-            with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.all_transpiler_names', return_value={'switch'}):
-                with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.read_switch_config', return_value=switch_config_data):
+        with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path", return_value=temp_path):
+            with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.all_transpiler_names", return_value={"switch"}):
+                # Create mock LSPConfig object
+                mock_switch_config = MagicMock()
+                mock_switch_config.custom = switch_config_data.get("custom", {})
+                mock_switch_config.options = switch_config_data.get("options", {})
+                with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.all_transpiler_configs", return_value={"switch": mock_switch_config}):
                     yield config_path
 
 
@@ -97,3 +101,16 @@ def mock_install_result():
     result.switch_home = "/Workspace/Users/test/.lakebridge-switch"
     result.created_by = "test@databricks.com"
     return result
+
+
+def setup_transpiler_repository_mock(mock_repo, tmp_path, config_path, switch_config_data):
+    """Setup common TranspilerRepository mock configuration"""
+    mock_repo.transpilers_path.return_value = tmp_path
+    mock_repo.transpiler_config_path.return_value = config_path
+
+    # Mock all_transpiler_configs for _get_previous_switch_installation
+    mock_switch_config = MagicMock()
+    mock_switch_config.custom = switch_config_data.get("custom", {})
+    mock_repo.all_transpiler_configs.return_value = {"switch": mock_switch_config}
+
+    return mock_repo

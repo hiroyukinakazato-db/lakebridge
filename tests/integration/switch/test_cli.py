@@ -62,7 +62,7 @@ class TestSwitchCLIIntegration:
 
         # Verify Switch appears in available transpilers
         all_transpilers = TranspilerRepository.user_home().all_transpiler_names()
-        assert 'switch' in all_transpilers, "Switch should appear in transpiler list"
+        assert "switch" in all_transpilers, "Switch should appear in transpiler list"
 
     def test_switch_routing_decision(self, switch_config_path, mock_application_context):
         """Test the decision logic for using Switch Jobs API path"""
@@ -125,12 +125,12 @@ class TestSwitchCLIIntegration:
     def test_switch_cli_integration_flow(self, mock_application_context, valid_transpile_config):
         """Test CLI integration flow with Switch (lightweight, mocked execution)"""
         # Mock the switch.api components for CLI integration testing
-        with patch('switch.api.job_runner.SwitchJobRunner') as mock_job_runner_class:
+        with patch("databricks.labs.lakebridge.cli.SwitchJobRunner") as mock_job_runner_class:
             mock_job_runner = MagicMock()
             mock_job_runner.run_async.return_value = 987654321  # Mock run ID
             mock_job_runner_class.return_value = mock_job_runner
 
-            with patch('databricks.labs.lakebridge.cli._SwitchTranspilerHandler.prepare_job_parameters') as mock_create_params:
+            with patch("databricks.labs.lakebridge.cli._SwitchTranspilerHandler.prepare_job_parameters") as mock_prepare_params:
                 from switch.api.job_parameters import SwitchJobParameters
                 mock_params = SwitchJobParameters(
                     input_dir="/Workspace/Users/test/sql_input",
@@ -139,7 +139,7 @@ class TestSwitchCLIIntegration:
                     result_schema="test_schema",
                     builtin_prompt="snowflake"
                 )
-                mock_create_params.return_value = (mock_params, False, 12345)  # async mode, job_id=12345
+                mock_prepare_params.return_value = (mock_params, False, 12345)  # async mode, job_id=12345
 
                 # Execute Switch CLI integration (focus on interface contract)
                 switch_handler = cli._SwitchTranspilerHandler(mock_application_context)
@@ -162,7 +162,7 @@ class TestSwitchCLIIntegration:
                 mock_job_runner.run_async.assert_called_once_with(mock_params)
 
                 # Verify parameter validation was called
-                mock_create_params.assert_called_once_with(valid_transpile_config)
+                mock_prepare_params.assert_called_once_with(valid_transpile_config)
 
     def test_switch_parameter_integration(self, valid_transpile_config, mock_application_context):
         """Test new parameter integration (source_format, target_type, output_extension)"""
@@ -172,9 +172,9 @@ class TestSwitchCLIIntegration:
             params, _, _ = switch_handler.prepare_job_parameters(valid_transpile_config)
 
             # Verify conversion parameters
-            assert hasattr(params, 'source_format')
-            assert hasattr(params, 'target_type') 
-            assert hasattr(params, 'output_extension')
+            assert hasattr(params, "source_format")
+            assert hasattr(params, "target_type") 
+            assert hasattr(params, "output_extension")
 
             # Verify default values from config
             assert params.source_format.value == "sql"
@@ -182,7 +182,7 @@ class TestSwitchCLIIntegration:
             assert params.output_extension is None
 
             # Verify request_params parameter
-            assert hasattr(params, 'request_params')
+            assert hasattr(params, "request_params")
             assert params.request_params is None
 
         except ImportError:
@@ -190,35 +190,35 @@ class TestSwitchCLIIntegration:
 
     def test_switch_error_handling(self, mock_application_context):
         """Test CLI error handling for Switch integration issues"""
-        # Test missing Switch package
-        with patch('databricks.labs.lakebridge.cli._SwitchTranspilerHandler.prepare_job_parameters', 
-                   side_effect=ImportError("Switch package not available")):
-            config = TranspileConfig(
-                transpiler_config_path="/fake/switch/config.yml",
-                source_dialect="snowflake",
-                input_source="/test/input",
-                output_folder="/test/output"
-            )
-
-            switch_handler = cli._SwitchTranspilerHandler(mock_application_context)
-            with pytest.raises(ValueError, match="Switch transpiler is not properly installed"):
-                switch_handler.run_job(config)
+        config = TranspileConfig(
+            transpiler_config_path="/fake/switch/config.yml",
+            source_dialect="snowflake",
+            input_source="/test/input",
+            output_folder="/test/output"
+        )
 
         # Test missing job ID in config
-        with patch('databricks.labs.lakebridge.cli._SwitchTranspilerHandler.prepare_job_parameters', 
+        with patch("databricks.labs.lakebridge.cli._SwitchTranspilerHandler.prepare_job_parameters", 
                    side_effect=ValueError("Switch job not found")):
+            switch_handler = cli._SwitchTranspilerHandler(mock_application_context)
+            with pytest.raises(RuntimeError, match="Switch transpiler failed"):
+                switch_handler.run_job(config)
+
+        # Test Switch job runner failure
+        with patch("databricks.labs.lakebridge.cli._SwitchTranspilerHandler.prepare_job_parameters", 
+                   side_effect=Exception("Job runner failed")):
             switch_handler = cli._SwitchTranspilerHandler(mock_application_context)
             with pytest.raises(RuntimeError, match="Switch transpiler failed"):
                 switch_handler.run_job(config)
 
     def test_config_job_id_extraction(self):
         """Test job ID extraction from Switch config (essential for CLI integration)"""
-        switch_config = TranspilerRepository.user_home().read_switch_config()
+        switch_config = TranspilerRepository.user_home().all_transpiler_configs().get("switch")
         assert switch_config is not None, "Switch config should exist"
-        assert 'custom' in switch_config, "Config should have custom section"
-        
+        assert switch_config.custom, "Config should have custom section"
+
         # job_id can be None if Switch hasn't been deployed yet, or a positive integer if deployed
-        job_id = switch_config.get('custom', {}).get('job_id')
+        job_id = switch_config.custom.get("job_id")
         if job_id is not None:
             assert isinstance(job_id, int), "Job ID should be an integer when present"
             assert job_id > 0, "Job ID should be positive when present"

@@ -17,8 +17,13 @@ from urllib import request
 from urllib.error import HTTPError, URLError
 from zipfile import ZipFile
 
+import yaml
+
 from databricks.sdk import WorkspaceClient
 from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
+
+from switch import __version__ as SWITCH_VERSION
+from switch.api.installer import SwitchInstaller as SwitchAPIInstaller
 
 logger = logging.getLogger(__name__)
 
@@ -557,13 +562,11 @@ class SwitchInstaller(TranspilerInstaller):
 
         # Step 4: Deploy to workspace and create job (with automatic cleanup)
         try:
-            from switch.api.installer import SwitchInstaller
-
             logger.info("Deploying Switch to workspace...")
             if previous_job_id or previous_switch_home:
                 logger.info(f"Previous installation detected - will clean up job_id={previous_job_id}, switch_home={previous_switch_home}")
 
-            switch_installer = SwitchInstaller(self._workspace_client)
+            switch_installer = SwitchAPIInstaller(self._workspace_client)
             install_result = switch_installer.install(
                 previous_job_id=previous_job_id,
                 previous_switch_home=previous_switch_home
@@ -577,10 +580,6 @@ class SwitchInstaller(TranspilerInstaller):
 
             return True
 
-        except ImportError as e:
-            logger.error(f"Switch package not found: {e}")
-            logger.error("Please install Switch package first.")
-            raise RuntimeError("Switch package not installed.") from e
         except Exception as e:
             logger.error(f"Failed to deploy Switch to workspace: {e}")
             raise RuntimeError(f"Switch workspace deployment failed: {e}") from e
@@ -609,29 +608,27 @@ class SwitchInstaller(TranspilerInstaller):
 
     def _setup_switch_version_state(self):
         """Setup state/version.json for Switch transpiler"""
-        from switch import __version__
-
         # Create state directory and version.json
         switch_path = self._transpiler_repository.transpilers_path() / "switch"
-        ArtifactInstaller._store_product_state(switch_path, __version__)
+        ArtifactInstaller._store_product_state(switch_path, SWITCH_VERSION)
 
-        logger.info(f"Setup Switch version state: v{__version__}")
+        logger.info(f"Setup Switch version state: v{SWITCH_VERSION}")
 
     def _get_previous_switch_installation(self) -> tuple[int | None, str | None]:
         """Extract previous Switch installation info from config for cleanup.
-        
+
         Returns:
             tuple: (previous_job_id, previous_switch_home) or (None, None) if not found
         """
-        config_data = self._transpiler_repository.read_switch_config()
-        if not config_data:
+        config = self._transpiler_repository.all_transpiler_configs().get("switch")
+        if not config:
             logger.debug("No previous Switch installation found or config read failed")
             return None, None
-        
-        custom = config_data.get('custom', {})
-        previous_job_id = custom.get('job_id')
-        previous_switch_home = custom.get('switch_home')
-        
+
+        custom = config.custom
+        previous_job_id = custom.get("job_id")
+        previous_switch_home = custom.get("switch_home")
+
         if previous_job_id is not None or previous_switch_home is not None:
             logger.debug(f"Found previous Switch installation: job_id={previous_job_id}, switch_home={previous_switch_home}")
         
@@ -639,32 +636,32 @@ class SwitchInstaller(TranspilerInstaller):
 
     def _update_switch_config(self, install_result):
         """Update Switch config.yml with job deployment information."""
-        config_data = self._transpiler_repository.read_switch_config()
-        if not config_data:
-            logger.warning("Failed to read Switch config for update")
-            return
-
-        # Update custom section with job information
-        if 'custom' not in config_data:
-            config_data['custom'] = {}
-
-        config_data['custom'].update({
-            'job_id': install_result.job_id,
-            'job_name': install_result.job_name,
-            'job_url': install_result.job_url,
-            'switch_home': install_result.switch_home,
-            'created_by': install_result.created_by
-        })
-
-        # Write updated config back
         try:
-            import yaml
+            # Read existing config
             config_path = self._transpiler_repository.transpiler_config_path("switch")
-            with open(config_path, 'w') as f:
-                yaml.dump(config_data, f, default_flow_style=False)
+            with open(config_path, "r") as f:
+                data = yaml.safe_load(f)
+
+            if "custom" not in data:
+                data["custom"] = {}
+
+            # Update custom section
+            data["custom"].update({
+                "job_id": install_result.job_id,
+                "job_name": install_result.job_name,
+                "job_url": install_result.job_url,
+                "switch_home": install_result.switch_home,
+                "created_by": install_result.created_by
+            })
+
+            # Write back
+            with open(config_path, "w") as f:
+                yaml.dump(data, f, default_flow_style=False)
 
             logger.debug(f"Updated Switch config with job info: {config_path}")
 
+        except (ValueError, FileNotFoundError) as e:
+            logger.warning(f"Failed to update Switch config: {e}")
         except Exception as e:
             logger.warning(f"Failed to update Switch config with job info: {e}")
 

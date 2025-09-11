@@ -37,8 +37,10 @@ from databricks.labs.lakebridge.transpiler.lsp.lsp_engine import LSPEngine
 from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
 from databricks.labs.lakebridge.transpiler.sqlglot.sqlglot_engine import SqlglotEngine
 from databricks.labs.lakebridge.transpiler.transpile_engine import TranspileEngine
-
 from databricks.labs.lakebridge.transpiler.transpile_status import ErrorSeverity
+
+from switch.api.job_parameters import SwitchJobParameters
+from switch.api.job_runner import SwitchJobRunner
 
 lakebridge = App(__file__)
 logger = get_logger(__file__)
@@ -180,8 +182,6 @@ class _SwitchTranspilerHandler:
             RuntimeError: If Switch execution fails
         """
         try:
-            from switch.api.job_runner import SwitchJobRunner
-
             logger.info("Starting Switch transpiler job")
 
             # Create Switch job parameters from config
@@ -223,12 +223,6 @@ class _SwitchTranspilerHandler:
                     "run_url": f"{self.ctx.workspace_client.config.host}/jobs/{job_id}/runs/{run_id}",
                 }]
 
-        except ImportError as import_error:
-            logger.debug(f"Switch import failed: {import_error}")
-            raise ValueError(
-                "Switch transpiler is not properly installed. "
-                "Please install using 'lakebridge install-transpiler' or ensure 'databricks-switch-plugin' package is available."
-            ) from import_error
         except Exception as e:
             logger.error(f"Failed to run Switch transpiler: {e}")
             raise RuntimeError(f"Switch transpiler failed: {e}") from e
@@ -245,28 +239,26 @@ class _SwitchTranspilerHandler:
         Raises:
             ValueError: If Switch configuration is invalid or job not found
         """
-        from switch.api.job_parameters import SwitchJobParameters
-
         # Read Switch configuration to get all available options
-        switch_config = TranspilerRepository.user_home().read_switch_config()
+        switch_config = TranspilerRepository.user_home().all_transpiler_configs().get("switch")
         if not switch_config:
             raise ValueError("Failed to read Switch configuration. Please check Switch installation.")
 
         # Get job ID from custom section
-        job_id = switch_config.get('custom', {}).get('job_id')
+        job_id = switch_config.custom.get("job_id")
         if not job_id:
             raise ValueError(
                 "Switch job not found. Please run 'lakebridge install-transpiler' first."
             )
 
         # Extract options from Switch config
-        config_options = switch_config.get('options', {}).get('all', [])
+        config_options = switch_config.options_for_dialect("all")
 
         # Build a mapping of option flags to their default values
         switch_defaults = {}
         for option in config_options:
-            flag = option.get('flag')
-            default_value = option.get('default')
+            flag = option.flag
+            default_value = option.default
             if flag and default_value is not None:
                 # Handle special default values
                 if default_value == "<none>":
@@ -283,28 +275,28 @@ class _SwitchTranspilerHandler:
             builtin_prompt=config.source_dialect,
 
             # Conversion settings
-            source_format=switch_defaults.get('source_format'),
-            target_type=switch_defaults.get('target_type'),
-            output_extension=switch_defaults.get('output_extension'),
+            source_format=switch_defaults.get("source_format"),
+            target_type=switch_defaults.get("target_type"),
+            output_extension=switch_defaults.get("output_extension"),
 
             # Execution settings
-            endpoint_name=switch_defaults.get('endpoint_name'),
-            concurrency=switch_defaults.get('concurrency'),
-            max_fix_attempts=switch_defaults.get('max_fix_attempts'),
-            log_level=switch_defaults.get('log_level'),
+            endpoint_name=switch_defaults.get("endpoint_name"),
+            concurrency=switch_defaults.get("concurrency"),
+            max_fix_attempts=switch_defaults.get("max_fix_attempts"),
+            log_level=switch_defaults.get("log_level"),
 
             # Advanced settings
-            token_count_threshold=switch_defaults.get('token_count_threshold'),
-            comment_lang=switch_defaults.get('comment_lang'),
-            conversion_prompt_yaml=switch_defaults.get('conversion_prompt_yaml'),
-            sql_output_dir=switch_defaults.get('sql_output_dir'),
+            token_count_threshold=switch_defaults.get("token_count_threshold"),
+            comment_lang=switch_defaults.get("comment_lang"),
+            conversion_prompt_yaml=switch_defaults.get("conversion_prompt_yaml"),
+            sql_output_dir=switch_defaults.get("sql_output_dir"),
 
             # Complex optional parameters
-            request_params=switch_defaults.get('request_params'),
+            request_params=switch_defaults.get("request_params"),
         )
 
         # Extract wait_for_completion flag
-        wait_for_completion = str(switch_defaults.get('wait_for_completion', 'false')).lower() == 'true'
+        wait_for_completion = str(switch_defaults.get("wait_for_completion", "false")).lower() == "true"
 
         return switch_params, wait_for_completion, job_id
 

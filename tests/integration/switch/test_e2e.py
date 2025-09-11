@@ -66,7 +66,7 @@ class LakebridgeTestConfig:
     test_schema: Optional[str] = None
 
     @classmethod
-    def from_env(cls) -> 'LakebridgeTestConfig':
+    def from_env(cls) -> "LakebridgeTestConfig":
         """Create configuration from environment variables"""
         return cls(
             catalog=os.getenv("LAKEBRIDGE_SWITCH_E2E_CATALOG", "main"),
@@ -79,8 +79,6 @@ class LakebridgeTestConfig:
 # Test configuration constants
 BASE_DIR_PREFIX = ".e2e-lakebridge-switch"
 EXAMPLES_DIR_SUFFIX = "-examples"
-TRANSPILERS_PATH = ".databricks/labs/remorph-transpilers"
-SWITCH_SUBDIR = "switch"
 SCHEMA_PREFIX = "e2e_lakebridge_switch"
 
 
@@ -298,7 +296,7 @@ class TestLakebridgeSwitchConversion:
 
         # Upload all files recursively
         file_count = 0
-        for file_path in local_dir.rglob('*'):
+        for file_path in local_dir.rglob("*"):
             if file_path.is_file():
                 # Calculate relative path to maintain directory structure
                 relative_path = file_path.relative_to(local_dir)
@@ -310,7 +308,7 @@ class TestLakebridgeSwitchConversion:
                     cls.workspace_client.workspace.mkdirs(workspace_parent)
                 
                 # Upload file
-                with open(file_path, 'rb') as f:
+                with open(file_path, "rb") as f:
                     content = f.read()
                 cls.workspace_client.workspace.upload(
                     path=workspace_file_path,
@@ -459,7 +457,7 @@ class TestLakebridgeSwitchConversion:
         transpiler_options = extra_options if extra_options else {}
 
         # Create TranspileConfig
-        transpiler_config_path = str(_get_switch_config_path())
+        transpiler_config_path = str(TranspilerRepository.user_home().transpiler_config_path("switch"))
         transpile_config = TranspileConfig(
             transpiler_config_path=transpiler_config_path,
             source_dialect=source_dialect,
@@ -492,9 +490,9 @@ class TestLakebridgeSwitchConversion:
 
 def _get_switch_job_id() -> Optional[int]:
     """Get Switch job ID from config"""
-    switch_config = TranspilerRepository.user_home().read_switch_config()
+    switch_config = TranspilerRepository.user_home().all_transpiler_configs().get("switch")
     if switch_config:
-        return switch_config.get('custom', {}).get('job_id')
+        return switch_config.custom.get("job_id")
     return None
 
 
@@ -508,9 +506,3 @@ def _verify_job_exists(workspace_client: WorkspaceClient, job_id: int) -> bool:
     except Exception as e:
         logger.error(f"Error checking job {job_id}: {e}")
         return False
-
-
-def _get_switch_config_path() -> Path:
-    """Get the Switch config path"""
-    transpilers_path = Path.home() / TRANSPILERS_PATH
-    return transpilers_path / SWITCH_SUBDIR / "lib" / "config.yml"

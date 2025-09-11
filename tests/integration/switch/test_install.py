@@ -28,7 +28,7 @@ import yaml
 
 from databricks.labs.lakebridge.transpiler.installers import SwitchInstaller
 from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
-from .fixtures import switch_config_data, mock_install_result, mock_workspace_client
+from .fixtures import switch_config_data, mock_install_result, mock_workspace_client, setup_transpiler_repository_mock
 
 
 logger = logging.getLogger(__name__)
@@ -58,15 +58,13 @@ class TestSwitchInstallationProcess:
             yaml.dump(switch_config_data, f)
 
         # Mock TranspilerRepository
-        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository') as mock_repo_class:
+        with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository") as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.transpilers_path.return_value = tmp_path
-            mock_repo.read_switch_config.return_value = switch_config_data
-            mock_repo.transpiler_config_path.return_value = config_path
+            setup_transpiler_repository_mock(mock_repo, tmp_path, config_path, switch_config_data)
             mock_repo_class.return_value = mock_repo
 
-            # Mock SwitchInstaller from switch.api.installer to return job information
-            with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
+            # Mock SwitchAPIInstaller to return job information
+            with patch("databricks.labs.lakebridge.transpiler.installers.SwitchAPIInstaller") as mock_switch_installer_class:
                 mock_installer = MagicMock()
                 mock_installer.install.return_value = mock_install_result
                 mock_switch_installer_class.return_value = mock_installer
@@ -75,16 +73,16 @@ class TestSwitchInstallationProcess:
                 switch_installer = SwitchInstaller(mock_repo, mock_workspace_client)
 
                 # Mock the display method to avoid stdout during tests
-                with patch.object(switch_installer, '_display_switch_installation_details') as mock_display:
-                    # Mock Switch version import
-                    with patch('switch.__version__', '1.0.1'):
+                with patch.object(switch_installer, "_display_switch_installation_details") as mock_display:
+                    # Mock Switch version (now imported as SWITCH_VERSION)
+                    with patch("databricks.labs.lakebridge.transpiler.installers.SWITCH_VERSION", "0.1.0"):
                         # Execute workspace deployment
                         switch_installer.install()
 
                         # Verify display method was called with install result
                         mock_display.assert_called_once_with(mock_install_result)
 
-                # Verify SwitchInstaller was called correctly
+                # Verify SwitchAPIInstaller was called correctly
                 mock_switch_installer_class.assert_called_once_with(mock_workspace_client)
                 mock_installer.install.assert_called_once_with(
                     previous_job_id=12345,
@@ -96,11 +94,11 @@ class TestSwitchInstallationProcess:
                 assert version_json_path.exists(), "version.json should be created"
 
                 import json
-                with version_json_path.open('r') as f:
+                with version_json_path.open("r") as f:
                     version_data = json.load(f)
 
-                assert version_data['version'] == 'v1.0.1', "Version should match Switch version"
-                assert 'date' in version_data, "Version data should contain date field"
+                assert version_data["version"] == "v0.1.0", "Version should match Switch version"
+                assert "date" in version_data, "Version data should contain date field"
 
                 logger.info(f"Workspace deployment completed. Job ID: {mock_install_result.job_id}")
 
@@ -117,11 +115,9 @@ class TestSwitchInstallationProcess:
             yaml.dump(switch_config_data, f)
 
         # Mock TranspilerRepository
-        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository') as mock_repo_class:
+        with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository") as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.transpilers_path.return_value = tmp_path
-            mock_repo.read_switch_config.return_value = switch_config_data
-            mock_repo.transpiler_config_path.return_value = config_path
+            setup_transpiler_repository_mock(mock_repo, tmp_path, config_path, switch_config_data)
             mock_repo_class.return_value = mock_repo
 
             # Create SwitchInstaller directly
@@ -131,22 +127,22 @@ class TestSwitchInstallationProcess:
             switch_installer._update_switch_config(mock_install_result)
 
             # Verify config was updated with job information
-            with config_path.open('r') as f:
+            with config_path.open("r") as f:
                 updated_config = yaml.safe_load(f)
 
-            assert 'custom' in updated_config, "Config missing 'custom' section after update"
-            custom = updated_config['custom']
+            assert "custom" in updated_config, "Config missing 'custom' section after update"
+            custom = updated_config["custom"]
 
-            assert custom['job_id'] == mock_install_result.job_id
-            assert custom['job_name'] == mock_install_result.job_name
-            assert custom['job_url'] == mock_install_result.job_url
-            assert custom['switch_home'] == mock_install_result.switch_home
-            assert custom['created_by'] == mock_install_result.created_by
+            assert custom["job_id"] == mock_install_result.job_id
+            assert custom["job_name"] == mock_install_result.job_name
+            assert custom["job_url"] == mock_install_result.job_url
+            assert custom["switch_home"] == mock_install_result.switch_home
+            assert custom["created_by"] == mock_install_result.created_by
 
             # Verify original config was preserved
-            assert updated_config['remorph']['name'] == 'switch'
-            assert 'snowflake' in updated_config['remorph']['dialects']
-            assert 'options' in updated_config
+            assert updated_config["remorph"]["name"] == "switch"
+            assert "snowflake" in updated_config["remorph"]["dialects"]
+            assert "options" in updated_config
 
             logger.info(f"Config updated with job ID {mock_install_result.job_id}")
 
@@ -178,15 +174,13 @@ class TestSwitchInstallationProcess:
             yaml.dump(previous_config_data, f)
 
         # Mock TranspilerRepository
-        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository') as mock_repo_class:
+        with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository") as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.transpilers_path.return_value = tmp_path
-            mock_repo.read_switch_config.return_value = previous_config_data
-            mock_repo.transpiler_config_path.return_value = config_path
+            setup_transpiler_repository_mock(mock_repo, tmp_path, config_path, previous_config_data)
             mock_repo_class.return_value = mock_repo
 
             # Mock workspace deployment
-            with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
+            with patch("databricks.labs.lakebridge.transpiler.installers.SwitchAPIInstaller") as mock_switch_installer_class:
                 mock_installer = MagicMock()
                 mock_installer.install.return_value = mock_install_result
                 mock_switch_installer_class.return_value = mock_installer
@@ -195,28 +189,28 @@ class TestSwitchInstallationProcess:
                 switch_installer = SwitchInstaller(mock_repo, mock_workspace_client)
 
                 # Mock the display method to avoid stdout during tests
-                with patch.object(switch_installer, '_display_switch_installation_details') as mock_display:
+                with patch.object(switch_installer, "_display_switch_installation_details") as mock_display:
                     # Execute installation - should detect and pass previous installation info
                     switch_installer.install()
 
                     # Verify display method was called
                     mock_display.assert_called_once_with(mock_install_result)
 
-                # Verify SwitchInstaller.install was called with previous installation info
+                # Verify SwitchAPIInstaller.install was called with previous installation info
                 mock_installer.install.assert_called_once_with(
                     previous_job_id=999888777,
                     previous_switch_home="/Workspace/Users/test/.lakebridge-switch-old"
                 )
 
                 # Verify config was updated with new job info
-                with config_path.open('r') as f:
+                with config_path.open("r") as f:
                     updated_config = yaml.safe_load(f)
 
-                assert updated_config['custom']['job_id'] == mock_install_result.job_id
-                assert updated_config['custom']['job_name'] == mock_install_result.job_name
-                assert updated_config['custom']['job_url'] == mock_install_result.job_url
-                assert updated_config['custom']['switch_home'] == mock_install_result.switch_home
-                assert updated_config['custom']['created_by'] == mock_install_result.created_by
+                assert updated_config["custom"]["job_id"] == mock_install_result.job_id
+                assert updated_config["custom"]["job_name"] == mock_install_result.job_name
+                assert updated_config["custom"]["job_url"] == mock_install_result.job_url
+                assert updated_config["custom"]["switch_home"] == mock_install_result.switch_home
+                assert updated_config["custom"]["created_by"] == mock_install_result.created_by
 
                 logger.info(f"Previous installation (job_id=999888777) cleaned up and new installation completed (job_id={mock_install_result.job_id})")
 
@@ -232,31 +226,18 @@ class TestSwitchInstallationProcess:
             yaml.dump(switch_config_data, f)
 
         # Mock TranspilerRepository
-        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository') as mock_repo_class:
+        with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository") as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.transpilers_path.return_value = tmp_path
-            mock_repo.read_switch_config.return_value = switch_config_data
-            mock_repo.transpiler_config_path.return_value = config_path
+            setup_transpiler_repository_mock(mock_repo, tmp_path, config_path, switch_config_data)
             mock_repo_class.return_value = mock_repo
 
             # Create SwitchInstaller directly
             switch_installer = SwitchInstaller(mock_repo, mock_workspace_client)
 
             # Mock version state setup (not relevant to error handling tests)
-            with patch.object(switch_installer, '_setup_switch_version_state'):
-                # Test SwitchInstaller import error (implementation: log error and raise RuntimeError)
-                with patch('switch.api.installer.SwitchInstaller', side_effect=ImportError("Switch package not available")):
-                    with caplog.at_level(logging.ERROR):
-                        with pytest.raises(RuntimeError, match="Switch package not installed"):
-                            switch_installer.install()  # should raise RuntimeError
-
-                    # verify error messages are logged
-                    assert "Switch package not found" in caplog.text
-                    assert "Please install Switch package first" in caplog.text
-                    logger.info("ImportError handling verified: error logged and RuntimeError raised")
-
-                # Test SwitchInstaller.install() failure (implementation: re-raise as RuntimeError)
-                with patch('switch.api.installer.SwitchInstaller') as mock_switch_installer_class:
+            with patch.object(switch_installer, "_setup_switch_version_state"):
+                # Test SwitchAPIInstaller.install() failure (implementation: re-raise as RuntimeError)
+                with patch("databricks.labs.lakebridge.transpiler.installers.SwitchAPIInstaller") as mock_switch_installer_class:
                     mock_installer = MagicMock()
                     mock_installer.install.side_effect = Exception("Job creation failed")
                     mock_switch_installer_class.return_value = mock_installer
@@ -269,28 +250,29 @@ class TestSwitchInstallationProcess:
             logger.info("Error handling tests completed successfully")
 
     def test_config_validation(self, tmp_path):
-        """Test config file validation and error handling"""
-        from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
-
-        with patch('databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path', return_value=tmp_path):
+        """Test config file validation and error handling through all_transpiler_configs"""
+        with patch("databricks.labs.lakebridge.transpiler.repository.TranspilerRepository.transpilers_path", return_value=tmp_path):
             switch_dir = tmp_path / "switch" / "lib" 
             switch_dir.mkdir(parents=True)
             config_path = switch_dir / "config.yml"
 
-            # Test missing config file (implementation: return None)
-            config = TranspilerRepository.user_home().read_switch_config()
-            assert config is None, "Config file not found should return None"
+            # Test missing config file (implementation: switch not in all_transpiler_configs)
+            all_configs = TranspilerRepository.user_home().all_transpiler_configs()
+            switch_config = all_configs.get("switch")
+            assert switch_config is None, "Config file not found should result in switch not available"
             logger.info("Missing config file handling verified: None returned")
 
-            # Test invalid config file (implementation: return None)
+            # Test invalid config file (implementation: YAML parsing error raises exception)
             with config_path.open("w") as f:
                 f.write("invalid: yaml: content: [")
 
-            config = TranspilerRepository.user_home().read_switch_config()
-            assert config is None, "Invalid YAML should return None"
-            logger.info("Invalid YAML handling verified: None returned")
+            # Invalid YAML will raise an exception during all_transpiler_configs() call
+            import yaml
+            with pytest.raises(yaml.scanner.ScannerError):
+                all_configs = TranspilerRepository.user_home().all_transpiler_configs()
+            logger.info("Invalid YAML handling verified: ScannerError raised as expected")
 
-            # Test valid config file (implementation: return parsed result)
+            # Test valid config file (implementation: switch available in all_transpiler_configs)
             # Use actual Switch config structure (version: 1 is required)
             valid_config = {
                 "remorph": {
@@ -305,9 +287,10 @@ class TestSwitchInstallationProcess:
             with config_path.open("w") as f:
                 yaml.dump(valid_config, f)
 
-            config = TranspilerRepository.user_home().read_switch_config()
-            assert config is not None, "Valid config should return parsed data"
-            assert config["remorph"]["name"] == "switch", "Config content should be correctly parsed"
-            logger.info("Valid config handling verified: parsed data returned")
+            all_configs = TranspilerRepository.user_home().all_transpiler_configs()
+            switch_config = all_configs.get("switch")
+            assert switch_config is not None, "Valid config should be available in all_transpiler_configs"
+            assert switch_config.name == "switch", "Config should have correct transpiler name"
+            logger.info("Valid config handling verified: LSPConfig object returned")
 
             logger.info("Config validation tests completed successfully")

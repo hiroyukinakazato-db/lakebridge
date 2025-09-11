@@ -38,7 +38,7 @@ dependencies = [
   "SQLAlchemy~=2.0.40",
   "pygls~=2.0.0a2",
   "duckdb~=1.2.2",
-  "databricks-switch-plugin>=1.0.0",
+  "databricks-switch-plugin>=0.1.0",
 ]
 
 [project.urls]
