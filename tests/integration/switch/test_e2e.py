@@ -473,7 +473,8 @@ class TestLakebridgeSwitchConversion:
 
         # Execute via Lakebridge CLI (always async)
         ctx = ApplicationContext(workspace_client)
-        return cli._execute_switch_directly(ctx, transpile_config)
+        switch_handler = cli._SwitchTranspilerHandler(ctx)
+        return switch_handler.run_job(transpile_config)
 
     def _verify_conversion_result(self, result: List[Dict[str, Any]]):
         """Verify conversion result (async only)"""

@@ -6,8 +6,6 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
-from databricks.labs.lakebridge.transpiler.repository import TranspilerRepository
-
 
 @pytest.fixture
 def switch_config_data():
