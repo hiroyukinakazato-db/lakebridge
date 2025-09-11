@@ -16,8 +16,8 @@ def switch_config_data():
             "name": "switch",
             "command_line": ["echo", "Switch uses Jobs API, not LSP"],
             "dialects": [
-                "mysql", "netezza", "oracle", "postgresql", 
-                "redshift", "snowflake", "teradata", "tsql",
+                "mssql", "mysql", "netezza", "oracle", "postgresql", 
+                "redshift", "snowflake", "synapse", "teradata",
                 "python", "scala", "airflow"
             ]
         },

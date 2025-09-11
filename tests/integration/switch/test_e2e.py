@@ -9,7 +9,7 @@ Test Classes:
 
 2. TestLakebridgeSwitchConversion: SQL and code conversion tests  
    - test_sql_basic_conversion: Snowflake → Databricks
-   - test_sql_advanced_conversion: TSQL → Databricks with advanced parameters  
+   - test_sql_advanced_conversion: MSSQL → Databricks with advanced parameters  
    - test_airflow_file_conversion: Airflow DAG → YAML file
 
 Environment Variables:
@@ -384,18 +384,18 @@ class TestLakebridgeSwitchConversion:
             raise
 
     def test_sql_advanced_conversion(self):
-        """Advanced SQL conversion: TSQL → Databricks with advanced parameters (async)"""
+        """Advanced SQL conversion: MSSQL → Databricks with advanced parameters (async)"""
         current_user = self.workspace_client.current_user.me().user_name
 
         try:
             # Execute conversion with advanced parameters using shared resources
-            input_dir = f"{self.examples_base_dir}/sql/tsql"
+            input_dir = f"{self.examples_base_dir}/sql/mssql"
             output_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}-advanced-output-{int(time.time())}"
             sql_output_dir = f"/Workspace/Users/{current_user}/{BASE_DIR_PREFIX}-advanced-sql-{int(time.time())}"
 
             result = self._execute_conversion(
                 workspace_client=self.workspace_client,
-                source_dialect="tsql",
+                source_dialect="mssql",
                 input_source=input_dir,
                 output_folder=output_dir,
                 catalog_name=self.config.catalog,

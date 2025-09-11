@@ -85,14 +85,15 @@ Convert SQL from various dialects to Databricks Python notebooks with automatic 
 
 | `--source-dialect` Value | Source Systems |
 |-------------|----------------|
+| `mssql` | Microsoft SQL Server, Azure SQL Database, Azure SQL Managed Instance, Amazon RDS for SQL Server |
 | `mysql` | MySQL, MariaDB, and MySQL-compatible services (including Amazon Aurora MySQL, RDS, Google Cloud SQL) |
 | `netezza` | IBM Netezza |
 | `oracle` | Oracle Database, Oracle Exadata, and Oracle-compatible services (including Amazon RDS) |
 | `postgresql` | PostgreSQL and PostgreSQL-compatible services (including Amazon Aurora PostgreSQL, RDS, Google Cloud SQL) |
 | `redshift` | Amazon Redshift |
 | `snowflake` | Snowflake |
+| `synapse` | Azure Synapse Analytics (dedicated SQL pools) |
 | `teradata` | Teradata |
-| `tsql` | Microsoft SQL Server, Azure SQL family (Database, Managed Instance, Synapse Analytics), Amazon RDS for SQL Server |
 
 ### Generic Sources
 
@@ -179,7 +180,7 @@ Switch operates differently from other Lakebridge transpilers:
 - `--input-source` - Databricks workspace path(s) or Unity Catalog Volume path(s) containing files to convert (see Input Source Patterns below)
 - `--output-folder` - Databricks workspace path for generated outputs
 - `--source-dialect` - Conversion type to use. Choose from:
-  - **SQL Dialects**: `mysql`, `snowflake`, `oracle`, `postgresql`, `redshift`, `teradata`, `netezza`, `tsql`
+  - **SQL Dialects**: `mssql`, `mysql`, `netezza`, `oracle`, `postgresql`, `redshift`, `snowflake`, `synapse`, `teradata`
   - **Generic sources**: `python`, `scala`, `airflow`
 - `--catalog-name` - Databricks catalog for state tables. Must already exist.
 - `--schema-name` - Databricks schema for state tables. Must already exist.
