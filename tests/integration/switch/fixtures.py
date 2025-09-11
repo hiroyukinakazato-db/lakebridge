@@ -108,7 +108,6 @@ def setup_transpiler_repository_mock(mock_repo, tmp_path, config_path, switch_co
     mock_repo.transpilers_path.return_value = tmp_path
     mock_repo.transpiler_config_path.return_value = config_path
 
-    # Mock all_transpiler_configs for _get_previous_switch_installation
     mock_switch_config = MagicMock()
     mock_switch_config.custom = switch_config_data.get("custom", {})
     mock_repo.all_transpiler_configs.return_value = {"switch": mock_switch_config}

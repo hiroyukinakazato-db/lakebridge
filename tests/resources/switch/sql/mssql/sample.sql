@@ -1,4 +1,4 @@
--- Sample T-SQL for E2E testing
+-- Sample MSSQL for E2E testing
 -- This is a minimal test file to verify Switch conversion functionality
 
 SELECT 
